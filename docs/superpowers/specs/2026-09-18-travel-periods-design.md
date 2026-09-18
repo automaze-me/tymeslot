@@ -101,7 +101,7 @@ Following the naming of the existing availability domain:
 ## Resolution rule
 
 `OwnerFrame.for_date(date, owner_timezone, config)` returns
-`%{timezone: String.t(), day: BusinessHours.day_availability(), source: :travel | :schedule}`.
+`%{timezone: String.t(), day: BusinessHours.day_availability() | nil, source: :travel | :schedule}`.
 
 | | Trip covers the date | Otherwise |
 | --- | --- | --- |
@@ -110,11 +110,15 @@ Following the naming of the existing availability domain:
 | Date overrides | meeting type's resolved schedule | meeting type's resolved schedule |
 | Policy | meeting type's resolved schedule | meeting type's resolved schedule |
 
-`day` is returned in the existing `BusinessHours.day_availability()` shape, with
-`breaks: []` for trip days. This is what keeps the `BusinessHours` edit
-surgical: only the source of the zone and the day changes; every line
-downstream of that, including the override lookup and the window construction,
-is untouched.
+`day` is a `BusinessHours.day_availability()` map (with `breaks: []`) when a
+trip covers the date, and `nil` otherwise. The `nil` matters: it lets
+`BusinessHours` keep its existing private `lookup_day_availability/3` as the
+non-trip path rather than moving that logic into `OwnerFrame`, which would mean
+making a private function public and handing `OwnerFrame` a `schedule_id` it
+otherwise does not need. The result is the smallest possible edit: only the
+source of the zone and of the day changes, and every line downstream — the
+override lookup, the timezone conversion, the window construction — is
+untouched.
 
 Two consequences worth stating explicitly:
 
