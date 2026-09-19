@@ -98,8 +98,13 @@ services:
       - SECRET_KEY_BASE=${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}
       - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY:?DATA_ENCRYPTION_KEY is required}
       - EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:?EMAIL_FROM_ADDRESS is required}
-      # The mailer defaults to SMTP and refuses to boot without a host.
-      - SMTP_HOST=${SMTP_HOST:?SMTP_HOST is required}
+      # SMTP_HOST is deliberately NOT required here: it is needed only when
+      # EMAIL_ADAPTER selects smtp (the default). With mailgun, postmark,
+      # sendgrid or ahasend there is no SMTP host at all, and requiring one
+      # would block a perfectly valid configuration. It is passed through
+      # below; when the SMTP adapter is in use and the host is missing, the
+      # app refuses to boot with "SMTP host is required (set SMTP_HOST
+      # environment variable)", which says the same thing at the right time.
 
       # ---- pass-through ----
       # Every remaining variable Tymeslot reads, extracted from the codebase.
@@ -129,6 +134,7 @@ services:
       - POSTMARK_API_KEY
       - SENDGRID_API_KEY
       - SMTP_CACERTFILE
+      - SMTP_HOST
       - SMTP_PASSWORD
       - SMTP_SSL
       - SMTP_TLS_VERIFY

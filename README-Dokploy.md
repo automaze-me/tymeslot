@@ -102,22 +102,34 @@ different PostgreSQL packaging, which it refuses to open.
 ## Step 2 — Environment variables
 
 Paste this into the Compose service's Environment tab and fill in the values.
-Five variables are genuinely required; the rest are email and optional OAuth.
+Five variables are required regardless of how you send mail; the rest depend on
+your mail provider, plus optional OAuth.
 
 ```dotenv
-# --- required ---
+# --- required, whatever mail provider you use ---
 PHX_HOST=booking.example.com
 SECRET_KEY_BASE=
 DATA_ENCRYPTION_KEY=
 POSTGRES_PASSWORD=
-SMTP_HOST=smtp.example.com
-
-# --- email: the From address must be on a domain your relay may send for ---
 EMAIL_FROM_ADDRESS=hello@example.com
 # EMAIL_FROM_NAME defaults to "Tymeslot"
-SMTP_USERNAME=
-SMTP_PASSWORD=
+
+# --- mail: pick ONE provider ---
+
+# (a) an API provider — recommended, credentials are checked at boot
+EMAIL_ADAPTER=mailgun
+MAILGUN_API_KEY=
+MAILGUN_DOMAIN=mg.example.com
+# MAILGUN_BASE_URL=https://api.eu.mailgun.net/v3   # EU accounts only
+
+# (b) or SMTP — the default when EMAIL_ADAPTER is unset
+# SMTP_HOST=smtp.example.com
+# SMTP_USERNAME=
+# SMTP_PASSWORD=
 ```
+
+`postmark`, `sendgrid` and `ahasend` work the same way as (a), with their own
+key variables.
 
 Generate the secrets:
 
@@ -291,6 +303,25 @@ Email is not optional, and not only because the product needs it. The mailer
 **defaults to SMTP** when `EMAIL_ADAPTER` is unset, and the SMTP configuration
 **raises at boot when `SMTP_HOST` is absent**. An instance with no mail
 configuration at all does not start.
+
+`SMTP_HOST` is therefore required *only when the SMTP adapter is in use*. The
+compose file deliberately does not demand it, so that `EMAIL_ADAPTER=mailgun`
+and friends deploy without inventing an SMTP host they will never contact.
+
+### Prefer an API provider over SMTP
+
+Tymeslot supports `mailgun`, `postmark`, `sendgrid` and `ahasend` natively, and
+there is a concrete operational reason to choose one: **their credentials are
+validated at boot.** `Tymeslot.Mailer.ApiProbe` calls the provider — for Mailgun,
+`{base_url}/domains/{domain}` — so a wrong key or domain fails visibly at
+startup. The SMTP path structurally cannot do this; `Tymeslot.Mailer.HealthCheck`
+states it outright: *"Not tested: SMTP authentication, which is validated on
+first email send."* A bad SMTP password therefore surfaces only as failed jobs
+and an open circuit breaker, long after the deploy looked healthy.
+
+EU-hosted Mailgun accounts need `MAILGUN_BASE_URL=https://api.eu.mailgun.net/v3`;
+the probe honours it too, so an EU account is not validated against the US
+endpoint.
 
 Booking confirmations, cancellations, reschedules and password resets all depend
 on it working, so this is a good default to have been given.
