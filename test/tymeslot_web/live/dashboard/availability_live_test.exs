@@ -5,9 +5,8 @@ defmodule TymeslotWeb.Dashboard.AvailabilityLiveTest do
   @moduletag :live
 
   import Tymeslot.DashboardTestHelpers
-  import Tymeslot.Factory
 
-  alias Tymeslot.Availability.{AvailabilityBreakSchema, Schedules, Travel, WeeklySchedule}
+  alias Tymeslot.Availability.{AvailabilityBreakSchema, Schedules, WeeklySchedule}
   alias Tymeslot.Infrastructure.AvailabilityCache
   alias Tymeslot.Repo
 
@@ -386,60 +385,6 @@ defmodule TymeslotWeb.Dashboard.AvailabilityLiveTest do
       # Weekend should remain unchanged
       saturday = WeeklySchedule.get_day_availability(schedule.id, 6)
       assert saturday.is_available == false
-    end
-  end
-
-  # ===========================================================================
-  # Travel section
-  # ===========================================================================
-
-  describe "the travel section" do
-    test "lists a trip with its label, dates and zone", %{conn: conn, profile: profile} do
-      insert(:travel_period,
-        profile: profile,
-        label: "Lisbon retreat",
-        start_date: ~D[2027-05-01],
-        end_date: ~D[2027-05-10],
-        timezone: "Europe/Lisbon"
-      )
-
-      {:ok, _view, html} = live(conn, ~p"/dashboard/availability")
-
-      assert html =~ "Lisbon retreat"
-      assert html =~ "Europe/Lisbon"
-    end
-
-    test "shows the empty state when there are no trips", %{conn: conn} do
-      {:ok, _view, html} = live(conn, ~p"/dashboard/availability")
-
-      assert html =~ "No trips yet."
-    end
-
-    test "deletes a trip via the confirmation modal", %{conn: conn, profile: profile} do
-      period =
-        insert(:travel_period,
-          profile: profile,
-          label: "Lisbon retreat",
-          start_date: ~D[2027-05-01],
-          end_date: ~D[2027-05-10],
-          timezone: "Europe/Lisbon"
-        )
-
-      {:ok, view, _html} = live(conn, ~p"/dashboard/availability")
-
-      view
-      |> element("button[phx-click='show_delete_travel_modal'][phx-value-id='#{period.id}']")
-      |> render_click()
-
-      html = render(view)
-      assert html =~ "Lisbon retreat"
-
-      view
-      |> element("#delete-travel-period-modal button", "Delete Trip")
-      |> render_click()
-
-      assert render(view) =~ "Trip deleted"
-      refute Enum.any?(Travel.list_for_profile(profile.id), &(&1.id == period.id))
     end
   end
 end

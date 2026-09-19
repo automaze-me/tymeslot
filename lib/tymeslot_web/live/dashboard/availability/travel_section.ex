@@ -57,6 +57,15 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelSection do
                 "%d %b %Y"
               )} · {period.timezone}
             </p>
+            <%!-- A trip with no available weekday leaves the host silently
+            unbookable for its whole span, so that state is called out here
+            rather than only inside the edit form. --%>
+            <p :if={no_bookable_hours?(period)} class="text-token-xs font-semibold text-red-600">
+              {dgettext(
+                "dashboard_availability",
+                "No bookable hours set. You are unavailable for this trip's entire span."
+              )}
+            </p>
           </div>
 
           <div class="flex shrink-0 items-center gap-2">
@@ -84,4 +93,9 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelSection do
     </section>
     """
   end
+
+  defp no_bookable_hours?(%{days: days}) when is_list(days),
+    do: not Enum.any?(days, & &1.is_available)
+
+  defp no_bookable_hours?(_period), do: false
 end

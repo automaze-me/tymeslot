@@ -22,6 +22,7 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   }
 
   alias Tymeslot.MeetingTypes.InputValidation, as: MeetingSettingsInputValidation
+  alias Tymeslot.Timezones
   alias Tymeslot.Utils.ChangesetUtils
   alias Tymeslot.Validation.Constraints
 
@@ -34,7 +35,7 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   alias TymeslotWeb.CustomInputModeHelper
 
   alias TymeslotWeb.Dashboard.Availability.{ListComponent, PolicyCard, ScheduleSwitcher}
-  alias TymeslotWeb.Live.Dashboard.Availability.TravelSection
+  alias TymeslotWeb.Live.Dashboard.Availability.{TravelForm, TravelFormHandler, TravelSection}
 
   # The policy settings differ only in which schedule field they write, so the
   # handlers below route through one pair of helpers driven by these tables.
@@ -52,6 +53,10 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
 
   # Query-string key carrying the schedule the page is editing.
   @schedule_param "schedule"
+
+  # Every event the travel form's markup emits, in one place so the dispatch
+  # guard below and `TravelFormHandler` cannot fall out of step.
+  @travel_form_events TravelFormHandler.events()
 
   # Value seeded into the custom input when a field currently sitting on a
   # preset is switched into custom mode. The preset lists themselves are
@@ -73,7 +78,16 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
         delete_travel_period: false
       )
 
-    {:ok, assign(socket, :schedule_menu_open, false)}
+    {:ok,
+     assign(socket,
+       schedule_menu_open: false,
+       show_travel_form: false,
+       travel_form_period: nil,
+       travel_form_timezone: nil,
+       travel_form_timezone_dropdown_open: false,
+       travel_form_timezone_search: "",
+       travel_form_errors: %{}
+     )}
   end
 
   @impl Phoenix.LiveComponent
@@ -87,6 +101,7 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
       |> load_travel_periods()
       |> assign(saving: false)
       |> assign(form_errors: %{})
+      |> assign(travel_form_errors: %{})
       |> assign_new(:custom_input_mode, fn -> CustomInputModeHelper.default_custom_mode() end)
 
     {:ok, socket}
@@ -221,6 +236,13 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
         period -> delete_travel_period(socket, period)
       end
     end)
+  end
+
+  # The travel form's own state handling — show/hide, the zone dropdown, the
+  # save — lives in `TravelFormHandler`, alongside `TravelForm`'s markup,
+  # rather than here: see that module's `@moduledoc` for why.
+  def handle_event(event, params, socket) when event in @travel_form_events do
+    TravelFormHandler.handle_event(event, params, socket)
   end
 
   # Scheduling policy
@@ -630,6 +652,19 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
         period_data={@delete_travel_period_modal_data}
         on_cancel={JS.push("hide_delete_travel_modal", target: @myself)}
         on_confirm={JS.push("confirm_delete_travel_period", target: @myself)}
+      />
+
+      <TravelForm.travel_form_modal
+        id="travel-form-modal"
+        show={@show_travel_form}
+        period={@travel_form_period}
+        timezone_options={Timezones.all_options()}
+        timezone={@travel_form_timezone}
+        timezone_dropdown_open={@travel_form_timezone_dropdown_open}
+        timezone_search={@travel_form_timezone_search}
+        form_errors={@travel_form_errors}
+        myself={@myself}
+        on_cancel={JS.push("hide_travel_form", target: @myself)}
       />
     </div>
     """

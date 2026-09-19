@@ -77,6 +77,7 @@ msgstr "Перерву видалено"
 #: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/schedule_form_modal.ex
 #: lib/tymeslot_web/live/dashboard/availability/day_card_component.ex
+#: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
 #, elixir-autogen, elixir-format
 msgid "Cancel"
 msgstr "Скасувати"
@@ -144,6 +145,7 @@ msgid "Invalid time format"
 msgstr "Некоректний формат часу"
 
 #: lib/tymeslot_web/live/dashboard/availability/day_card_component.ex
+#: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
 #, elixir-autogen, elixir-format
 msgid "Label"
 msgstr "Назва"
@@ -455,6 +457,7 @@ msgid "Rename schedule"
 msgstr "Перейменувати розклад"
 
 #: lib/tymeslot_web/components/dashboard/availability/schedule_form_modal.ex
+#: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
 #, elixir-autogen, elixir-format
 msgid "Save"
 msgstr "Зберегти"
@@ -661,3 +664,43 @@ msgstr "Поїздки"
 #, elixir-autogen, elixir-format
 msgid "Trip deleted"
 msgstr "Поїздку видалено"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
+#, elixir-autogen, elixir-format
+msgid "Bookable hours during this trip"
+msgstr "Години для бронювання під час цієї поїздки"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
+#, elixir-autogen, elixir-format
+msgid "Edit trip"
+msgstr "Редагувати поїздку"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
+#, elixir-autogen, elixir-format
+msgid "End date"
+msgstr "Дата закінчення"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
+#, elixir-autogen, elixir-format
+msgid "New trip"
+msgstr "Нова поїздка"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "No bookable hours set. You are unavailable for this trip's entire span."
+msgstr "Години для бронювання не вказано. Ви недоступні протягом усієї поїздки."
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
+#, elixir-autogen, elixir-format
+msgid "Start date"
+msgstr "Дата початку"
+
+#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Trip saved"
+msgstr "Поїздку збережено"
+
+#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Unknown timezone"
+msgstr "Невідомий часовий пояс"
