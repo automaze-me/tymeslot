@@ -25,6 +25,8 @@ defmodule Tymeslot.Availability.Travel do
   alias Tymeslot.Availability.TravelPeriodQueries
   alias Tymeslot.Availability.TravelPeriodSchema
   alias Tymeslot.Infrastructure.AvailabilityCache
+  alias Tymeslot.Profiles
+  alias Tymeslot.Profiles.ProfileQueries
   alias Tymeslot.Profiles.ProfileSchema
 
   @doc """
@@ -34,6 +36,50 @@ defmodule Tymeslot.Availability.Travel do
   defdelegate for_window(profile_id, start_date, end_date),
     to: TravelPeriodQueries,
     as: :list_overlapping
+
+  @doc """
+  The zone the profile is on for a given date: the covering trip's zone, else
+  the profile's own.
+
+  The date matters, and which date to pass depends on the question being
+  asked. "What time is it for me now" — the dashboard grid, desktop reminders
+  — passes today. "When will this meeting be for me" — host-facing emails —
+  passes the meeting's own date, so a booking made at home for a date abroad
+  is announced in the zone the host will actually be in.
+
+  This lives here rather than in `Tymeslot.Profiles.Timezone` — that module's
+  moduledoc restricts it to pure, Phoenix/LiveView-free helpers, and it holds
+  only `prefill_timezone/2`; a resolver that reads trips from the database
+  does not fit there. It also stays out of `profiles.ex` itself: this fork
+  rebases against upstream indefinitely, so new behaviour prefers a new file
+  with no conflict surface over an edit to a hot, frequently-changed one.
+  Trips are read directly rather than through a prefetched
+  `availability_config`, because this resolver's callers (emails, the
+  dashboard grid) have no schedule context to prefetch alongside.
+  """
+  @spec timezone_on(ProfileSchema.t(), Date.t()) :: String.t()
+  def timezone_on(%ProfileSchema{} = profile, %Date{} = date) do
+    case TravelPeriodQueries.list_overlapping(profile.id, date, date) do
+      [period | _rest] -> period.timezone
+      [] -> profile.timezone || Profiles.get_default_timezone()
+    end
+  end
+
+  @doc """
+  `timezone_on/2` for a caller that holds only a user id, such as an email
+  builder working from `meeting.organizer_user_id`. A `nil` id (an
+  unattributed meeting) and a user with no profile both resolve to the
+  default zone rather than raising.
+  """
+  @spec timezone_for_user_on(integer() | nil, Date.t()) :: String.t()
+  def timezone_for_user_on(nil, %Date{}), do: Profiles.get_default_timezone()
+
+  def timezone_for_user_on(user_id, %Date{} = date) do
+    case ProfileQueries.get_by_user_id(user_id) do
+      {:ok, profile} -> timezone_on(profile, date)
+      {:error, :not_found} -> Profiles.get_default_timezone()
+    end
+  end
 
   @doc """
   Every trip a profile owns, earliest first.
