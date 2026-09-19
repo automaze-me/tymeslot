@@ -80,5 +80,28 @@ defmodule Tymeslot.Emails.AppointmentBuilderTravelTest do
 
       assert %DateTime{time_zone: "America/New_York"} = result.start_time_owner_tz
     end
+
+    test "the attendee-facing fallback stays on the host's home zone, not the trip zone", %{
+      user: user
+    } do
+      # `attendee_timezone: nil` forces `attendee_timezone/2`'s emergency
+      # fallback. The host is travelling on this date, so the two
+      # zones (owner vs. attendee-facing) must differ from each other to
+      # prove the fallback did NOT pick up the trip zone.
+      meeting =
+        insert(:meeting,
+          organizer_user_id: user.id,
+          start_time: ~U[2027-03-17 14:00:00Z],
+          end_time: ~U[2027-03-17 15:00:00Z],
+          attendee_timezone: nil
+        )
+
+      result = AppointmentBuilder.from_meeting(meeting)
+
+      # Host-facing: trip-aware.
+      assert %DateTime{time_zone: "Europe/Berlin"} = result.start_time_owner_tz
+      # Attendee-facing fallback: the host's static home zone, unaffected by travel.
+      assert result.attendee_timezone == "America/New_York"
+    end
   end
 end

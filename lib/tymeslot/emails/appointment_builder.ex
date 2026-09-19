@@ -24,8 +24,8 @@ defmodule Tymeslot.Emails.AppointmentBuilder do
     attendee_locale = Map.get(meeting, :attendee_locale, "en")
 
     Gettext.with_locale(TymeslotWeb.Gettext, attendee_locale, fn ->
-      owner_timezone = owner_timezone(meeting)
-      attendee_timezone = attendee_timezone(meeting, owner_timezone)
+      {owner_timezone, home_timezone} = owner_timezone(meeting)
+      attendee_timezone = attendee_timezone(meeting, home_timezone)
 
       organizer_profile = organizer_profile(meeting)
 
@@ -79,6 +79,15 @@ defmodule Tymeslot.Emails.AppointmentBuilder do
   # meeting within a few hours of midnight on a trip's first or last day can
   # still land on the adjacent date if the host's home-zone day and the trip
   # zone's day disagree.
+  #
+  # Returns `{owner_timezone, home_timezone}`: the first is the (possibly
+  # trip-resolved) zone shown to the host, the second is always the host's
+  # static profile zone. `attendee_timezone/2`'s emergency fallback must use
+  # the static zone, not the trip zone — a booker seeing the displayed zone
+  # shift because the host happens to be travelling would be a surprise the
+  # fallback was never meant to introduce, so the pre-trip behaviour is kept
+  # byte-identical there on purpose. Do not "simplify" this back to a single
+  # return value.
   defp owner_timezone(meeting) do
     case meeting.organizer_user_id do
       nil ->
@@ -86,7 +95,7 @@ defmodule Tymeslot.Emails.AppointmentBuilder do
           meeting_uid: meeting.uid
         )
 
-        @default_timezone
+        {@default_timezone, @default_timezone}
 
       user_id ->
         home_timezone = Profiles.get_user_timezone(user_id)
@@ -98,15 +107,15 @@ defmodule Tymeslot.Emails.AppointmentBuilder do
               |> DateTimeUtils.convert_to_timezone(home_timezone)
               |> DateTime.to_date()
 
-            Travel.timezone_for_user_on(user_id, meeting_date)
+            {Travel.timezone_for_user_on(user_id, meeting_date), home_timezone}
 
           _no_start_time ->
-            home_timezone
+            {home_timezone, home_timezone}
         end
     end
   end
 
-  defp attendee_timezone(meeting, owner_timezone) do
+  defp attendee_timezone(meeting, home_timezone) do
     case meeting.attendee_timezone do
       nil ->
         Logger.warning(
@@ -114,7 +123,7 @@ defmodule Tymeslot.Emails.AppointmentBuilder do
           meeting_uid: meeting.uid
         )
 
-        owner_timezone
+        home_timezone
 
       timezone ->
         timezone
