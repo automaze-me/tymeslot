@@ -16,10 +16,12 @@ application behaviour.
 - [Step 2 — Environment variables](#step-2--environment-variables)
 - [Step 3 — Domain and TLS](#step-3--domain-and-tls)
 - [Step 4 — Deploy and verify](#step-4--deploy-and-verify)
+  - [Proving the environment reached the container](#proving-the-environment-reached-the-container)
 - [Step 5 — First account](#step-5--first-account)
 - [Email](#email)
 - [Calendar OAuth callbacks](#calendar-oauth-callbacks)
 - [Keeping the fork current](#keeping-the-fork-current)
+  - [Keeping the pass-through list current](#keeping-the-pass-through-list-current)
 - [Backups](#backups)
 - [Troubleshooting](#troubleshooting)
 - [Appendix — the Application route](#appendix--the-application-route)
@@ -150,6 +152,45 @@ Everything else the app needs is set in the compose file and should not be
 duplicated here: `DEPLOYMENT_TYPE`, `TYMESLOT_EMBEDDED_DB`, `DATABASE_URL`,
 `SMTP_PORT` (587), `EMAIL_FROM_NAME`, and the Postgres user and database name.
 
+### How variables reach the container — and how they silently don't
+
+This is the part that bites in Compose deployments, so it is worth
+understanding rather than trusting.
+
+Setting a variable on Dokploy's Environment tab makes it available to the
+**Compose CLI**. It does **not** put it inside the container. Only two things
+do that: an entry in the service's `environment:` list, or an `env_file`. A
+variable that is set in Dokploy but named nowhere in the compose file
+interpolates nowhere and is simply absent at runtime — no error, no warning,
+and the app behaves as though you never set it.
+
+`docker-compose.dokploy.yml` therefore names **every** environment variable
+Tymeslot reads, extracted from the codebase rather than assembled by hand:
+
+- A `KEY=value` entry sets the value in the file, with `${KEY:-default}` so you
+  can still override it from Dokploy.
+- A bare `KEY` entry passes through whatever Dokploy supplied.
+
+The bare form matters for a second reason. An unset bare key is **omitted from
+the container environment entirely**, rather than being set to an empty string.
+An earlier draft of this file wrote `GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}`,
+which injects `""` — and because an empty string is truthy in Elixir, that
+sails straight past the app's `System.get_env("GOOGLE_CLIENT_ID") || raise`
+guard and configures OAuth with an empty client id instead of failing loudly.
+Bare keys avoid the whole class of problem.
+
+There is also an `env_file` entry pointing at `.env`, marked `required: false`
+so it is a no-op when absent. It is a second net for variables a future
+upstream version reads that are not yet in the list — worth having on a fork
+that rebases indefinitely. `environment:` takes precedence over it, so the
+derived values stay authoritative.
+
+One naming collision to be aware of: Dokploy's own `${{project.VAR}}` and
+`${{environment.VAR}}` template syntax is substituted by **Dokploy**, into the
+values it hands to Compose. Compose's `${VAR}` is a different mechanism at a
+different layer. Both can be in play; don't confuse one for the other when
+something fails to resolve.
+
 ### Optional — calendar OAuth
 
 Needed only for Google Calendar and Microsoft 365 connections. Exchange (EWS),
@@ -209,6 +250,31 @@ Deploy, then read the logs. A healthy first boot shows, in order:
 4. Phoenix starting and listening on port 4000.
 
 Then load `https://booking.example.com`.
+
+### Proving the environment reached the container
+
+Don't infer it from the app working — check. From Dokploy's terminal for the
+service, or over SSH on the VPS:
+
+```bash
+docker compose -f docker-compose.dokploy.yml exec tymeslot env | sort
+```
+
+Every variable you set should appear. A variable you set that is **missing**
+from that output was not named in the compose file's `environment:` list — add
+it as a bare key and redeploy.
+
+Before deploying, the same thing can be checked without running anything, which
+is faster and safer:
+
+```bash
+docker compose -f docker-compose.dokploy.yml config
+```
+
+In that output, a variable resolved to `null` is one that is named in the file
+but currently unset — it will be absent from the container, which is correct. A
+variable you expected to see but which appears nowhere at all is the failure
+case.
 
 ## Step 5 — First account
 
@@ -288,6 +354,41 @@ new files: see
 **Before any upgrade**, take a database backup (see below). Migrations run
 automatically on boot and are not reversible in place.
 
+### Keeping the pass-through list current
+
+An upstream release can add an environment variable, and the compose file will
+not know about it — the symptom being a setting that appears to do nothing.
+After a rebase, run this from the repository root. It prints the variables
+Tymeslot reads that the compose file does not name; empty output means complete
+coverage:
+
+```bash
+reads=$(
+  {
+    grep -rh 'get_env\|fetch_env' lib config --include=*.ex --include=*.exs |
+      grep -o '"[A-Z][A-Z0-9_]\{2,\}"'
+    grep -rho '"[A-Z][A-Z0-9_]\{2,\}"' \
+      lib/tymeslot/mailer/providers.ex \
+      lib/tymeslot/infrastructure/database_config.ex
+  } | tr -d '"' | sort -u |
+    grep -vE '^(CLOUDRON_|MIX_|TEST_)' |
+    grep -vE '^(DB_SUFFIX|DEV_CALENDAR|DEV_EMPTY_CALENDAR|E2E|RELEASE_ROOT|PHX_SERVER|LOG_FILE_PATH|SMTP)$'
+)
+named=$(
+  grep -oE '^      - [A-Z][A-Z0-9_]*(=|$)' docker-compose.dokploy.yml |
+    sed 's/^      - //; s/=$//' | sort -u
+)
+comm -23 <(echo "$reads") <(echo "$named")
+```
+
+Add anything it prints to the pass-through section of the compose file as a
+bare key. The exclusions are deliberate: `CLOUDRON_*` belongs to a different
+deployment target, `MIX_*` and `TEST_*` are build and test concerns, and
+`PHX_SERVER` is set by the entrypoint.
+
+This check is how `AHASEND_ACCOUNT_ID` and `AHASEND_API_KEY` were found — a
+mail provider a hand-written list had missed.
+
 ## Backups
 
 Use Dokploy's backup feature on the Postgres service — that is most of what
@@ -310,6 +411,8 @@ Test a restore at least once. An untested backup is a hypothesis.
 | `network dokploy-network declared as external, but could not be found` | Dokploy's shared network is missing or named differently on your install. Check `docker network ls` on the VPS and correct the name at the bottom of the compose file. |
 | `build` ignored, or "unsupported" on deploy | The service is running in Docker Stack mode. The file builds from source, so it needs Docker Compose mode. |
 | Domain change had no effect | Compose domains are Traefik labels, not hot-reloaded. Redeploy. |
+| A variable set in Dokploy has no effect | It is not named in the compose file's `environment:` list, so it never reached the container. Confirm with `exec tymeslot env`, then add it as a bare key. |
+| A feature behaves as though a secret were set to nonsense | Something injected an empty string rather than leaving the variable unset. Check for a `${VAR:-}` entry; use a bare key instead. |
 | Postgres authentication failures with a base64 password | `/` or `+` in the password corrupted `DATABASE_URL`. Use `openssl rand -hex 32`, or switch to the discrete variables. |
 | Logs show PostgreSQL initialising | Docker Build Stage is not `release-slim`, or the database variables did not reach the container. |
 | `no database configured` and exit | `TYMESLOT_EMBEDDED_DB=false` with no reachable database. Check `DATABASE_HOST` against Dokploy's internal host. |
@@ -355,9 +458,22 @@ still the one in the tables above.
 
 `docker-compose.dokploy.yml` was validated with `docker compose config`: the
 derived `DATABASE_URL` interpolates to
-`postgres://tymeslot:<password>@postgres:5432/tymeslot`, `dokploy-network`
-resolves as external, and the volumes namespace per project rather than
-colliding with upstream's pinned names.
+`postgres://tymeslot:<password>@postgres:5432/tymeslot`, an operator-supplied
+`DATABASE_URL` overrides it, `dokploy-network` resolves as external, and the
+volumes namespace per project rather than colliding with upstream's pinned
+names.
+
+The environment pass-through was verified by running a container, not only by
+reading the spec. With `environment: [SET_VAR, UNSET_VAR, EMPTY_VAR=]` and only
+`SET_VAR` set, the container's own `env` showed `SET_VAR=hello` and
+`EMPTY_VAR=` but no `UNSET_VAR` at all — confirming that a bare unset key is
+omitted rather than blanked, which is the property the list relies on.
+
+The pass-through list covers every variable read by `lib/` and `config/`, plus
+`lib/tymeslot/mailer/providers.ex` and
+`lib/tymeslot/infrastructure/database_config.ex`, checked by the script under
+[Keeping the pass-through list current](#keeping-the-pass-through-list-current);
+it currently reports no gaps.
 
 ---
 

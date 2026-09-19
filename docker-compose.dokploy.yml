@@ -44,59 +44,172 @@ services:
     expose:
       - "4000"
 
+    # ---------------------------------------------------------------------
+    # How variables reach the container
+    #
+    # Two mechanisms, deliberately both.
+    #
+    # 1. The `environment` list below. `KEY=value` sets a value here; a bare
+    #    `KEY` passes through whatever Dokploy supplied to Compose. **This list
+    #    is the gate.** A variable you set on Dokploy's Environment tab that is
+    #    not named here interpolates nowhere and never reaches the container —
+    #    the single most common way a Compose deployment silently ignores its
+    #    configuration.
+    #
+    #    A bare key whose variable is unset is omitted from the container
+    #    environment entirely, rather than being set to an empty string. That
+    #    distinction matters here: "" is truthy in Elixir, so an empty value
+    #    would sail past every `System.get_env(...) || raise` check in the app
+    #    and misconfigure it silently instead of failing loudly.
+    #
+    # 2. `env_file`, as a second net for variables a future upstream version
+    #    reads that are not yet in the list below — worth having on a fork that
+    #    rebases indefinitely. `required: false` makes it a no-op when the file
+    #    is absent, and `environment` takes precedence over it, so the derived
+    #    values below stay authoritative. Needs Compose 2.24 or newer.
+    #
+    # To verify what actually arrived, see README-Dokploy.md, "Proving the
+    # environment reached the container".
+    # ---------------------------------------------------------------------
+    env_file:
+      - path: .env
+        required: false
+
     environment:
-      DEPLOYMENT_TYPE: docker
+      # ---- fixed by this file: they describe its shape, not your preference ----
+      - DEPLOYMENT_TYPE=docker
+      # The slim target carries no PostgreSQL. Set so a misconfiguration fails
+      # with "no database configured" rather than a confusing init error.
+      - TYMESLOT_EMBEDDED_DB=false
 
-      # No bundled database on the slim target. Set explicitly so a
-      # misconfiguration fails with "no database configured" rather than a
-      # confusing PostgreSQL initialisation error.
-      TYMESLOT_EMBEDDED_DB: "false"
+      # ---- derived, and overridable by setting the same name in Dokploy ----
+      # Built from the fixed user and database name, this project's postgres
+      # service, and the one password you supply. Ecto parses it and merges it
+      # over any discrete DATABASE_*/POSTGRES_* settings.
+      - DATABASE_URL=${DATABASE_URL:-postgres://tymeslot:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/tymeslot}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Tymeslot}
+      - SMTP_PORT=${SMTP_PORT:-587}
 
-      # Derived: the user and database name are fixed below, the host is this
-      # project's postgres service, and the password is the one variable you
-      # supply. Ecto parses this and merges it over any discrete settings, so
-      # it is the single source of truth for the connection.
-      DATABASE_URL: postgres://tymeslot:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/tymeslot
-
-      # Alternative to DATABASE_URL, for a password with URL-special
-      # characters. Uncomment these four and delete DATABASE_URL above.
-      # DATABASE_HOST: postgres
-      # DATABASE_PORT: "5432"
-      # POSTGRES_DB: tymeslot
-      # POSTGRES_USER: tymeslot
-      # POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-
-      # Must match the Host on Dokploy's Domains tab exactly. Phoenix builds
-      # every absolute URL — booking links, email links, OAuth redirect URIs —
-      # from this rather than from the request.
-      PHX_HOST: ${PHX_HOST:?PHX_HOST is required}
-
-      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}
-      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?DATA_ENCRYPTION_KEY is required}
-
-      # Not derived from PHX_HOST on purpose: the From address has to be on a
-      # domain your relay is authorised to send for, which is often not the
-      # domain the booking page runs on. Deriving it would quietly break SPF.
-      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:?EMAIL_FROM_ADDRESS is required}
-      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Tymeslot}
-
+      # ---- required: the deploy fails here rather than booting misconfigured ----
+      # PHX_HOST must match the Host on Dokploy's Domains tab exactly. Phoenix
+      # builds every absolute URL from it — booking links, email links, OAuth
+      # redirect URIs — not from the incoming request.
+      - PHX_HOST=${PHX_HOST:?PHX_HOST is required}
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}
+      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY:?DATA_ENCRYPTION_KEY is required}
+      - EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:?EMAIL_FROM_ADDRESS is required}
       # The mailer defaults to SMTP and refuses to boot without a host.
-      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST is required}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      # Blank is read as absent, so an unauthenticated relay needs no change.
-      # Set both together or neither; one alone raises at boot.
-      SMTP_USERNAME: ${SMTP_USERNAME:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      - SMTP_HOST=${SMTP_HOST:?SMTP_HOST is required}
 
-      # Calendar OAuth, only for Google and Microsoft 365. Exchange, CalDAV,
-      # Nextcloud, Radicale, Baikal, Zimbra, mailbox.org, Apple and ICS feeds
-      # are configured entirely in the app and need nothing here.
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_STATE_SECRET: ${GOOGLE_STATE_SECRET:-}
-      OUTLOOK_CLIENT_ID: ${OUTLOOK_CLIENT_ID:-}
-      OUTLOOK_CLIENT_SECRET: ${OUTLOOK_CLIENT_SECRET:-}
-      OUTLOOK_STATE_SECRET: ${OUTLOOK_STATE_SECRET:-}
+      # ---- pass-through ----
+      # Every remaining variable Tymeslot reads, extracted from the codebase.
+      # Set any of them on Dokploy's Environment tab and it arrives; leave it
+      # unset and it is absent from the container, exactly as the app expects.
+      # Regenerate after a rebase — see README-Dokploy.md, "Keeping the
+      # pass-through list current".
+      # Database
+      - DATABASE_HOST
+      - DATABASE_POOL_SIZE
+      - DATABASE_PORT
+      - DATABASE_SSL
+      - DATABASE_SSL_CACERT_FILE
+      - POSTGRES_DB
+      - POSTGRES_PASSWORD
+      - POSTGRES_USER
+
+      # Mail
+      - AHASEND_ACCOUNT_ID
+      - AHASEND_API_KEY
+      - EMAIL_ADAPTER
+      - EMAIL_CONTACT_RECIPIENT
+      - EMAIL_SUPPORT_ADDRESS
+      - MAILGUN_API_KEY
+      - MAILGUN_BASE_URL
+      - MAILGUN_DOMAIN
+      - POSTMARK_API_KEY
+      - SENDGRID_API_KEY
+      - SMTP_CACERTFILE
+      - SMTP_PASSWORD
+      - SMTP_SSL
+      - SMTP_TLS_VERIFY
+      - SMTP_USERNAME
+
+      # Sign-in, registration and SSO
+      - ENABLE_GITHUB_AUTH
+      - ENABLE_GOOGLE_AUTH
+      - ENABLE_OAUTH_AUTH
+      - GITHUB_CLIENT_ID
+      - GITHUB_CLIENT_SECRET
+      - OAUTH_ALLOW_ID_FALLBACK
+      - OAUTH_AUTHORIZE_URL
+      - OAUTH_CLIENT_ID
+      - OAUTH_CLIENT_SECRET
+      - OAUTH_PROVIDER_URL
+      - OAUTH_SCOPE
+      - OAUTH_TOKEN_URL
+      - OAUTH_USERINFO_URL
+      - PASSWORD_AUTH_ENABLED
+      - RECAPTCHA_BOOKING_ACTION
+      - RECAPTCHA_BOOKING_ENABLED
+      - RECAPTCHA_BOOKING_MIN_SCORE
+      - RECAPTCHA_EXPECTED_HOSTNAMES
+      - RECAPTCHA_SECRET_KEY
+      - RECAPTCHA_SIGNUP_ACTION
+      - RECAPTCHA_SIGNUP_ENABLED
+      - RECAPTCHA_SIGNUP_MIN_SCORE
+      - RECAPTCHA_SITE_KEY
+      - REGISTRATION_ENABLED
+
+      # Calendar and video providers
+      - GOOGLE_CLIENT_ID
+      - GOOGLE_CLIENT_SECRET
+      - GOOGLE_STATE_SECRET
+      - MIROTALK_API_KEY
+      - MIROTALK_BASE_URL
+      - OUTLOOK_CLIENT_ID
+      - OUTLOOK_CLIENT_SECRET
+      - OUTLOOK_STATE_SECRET
+      - SLACK_CLIENT_ID
+      - SLACK_CLIENT_SECRET
+      - SLACK_ENABLED
+      - TELEGRAM_BOT_TOKEN
+      - TELEGRAM_BOT_USERNAME
+      - TELEGRAM_ENABLED
+      - TELEGRAM_WEBHOOK_SECRET
+      - ZOOM_CLIENT_ID
+      - ZOOM_CLIENT_SECRET
+      - ZOOM_DEAUTH_SECRET
+      - ZOOM_STATE_SECRET
+      - ZOOM_UPDATE_SCOPE_ENABLED
+
+      # Payments
+      - MEETING_PAYMENTS_APPLICATION_FEE_BP
+      - MEETING_PAYMENTS_DEFAULT_COUNTRY
+      - MEETING_PAYMENTS_ENABLED
+      - STRIPE_CONNECT_WEBHOOK_SECRET
+      - STRIPE_SECRET_KEY
+      - STRIPE_WEBHOOK_SECRET
+
+      # Networking and proxies
+      - ALLOW_PRIVATE_IPS_FOR_CALENDAR
+      - ALLOW_PRIVATE_IPS_FOR_VIDEO
+      - ALLOW_PRIVATE_IPS_FOR_WEBHOOKS
+      - DNS_CLUSTER_QUERY
+      - HTTPS_PROXY
+      - HTTP_PROXY
+      - LISTEN_IP
+      - NO_PROXY
+      - PORT
+      - TRUST_PRIVATE_CLIENT_IPS
+      - URL_SCHEME
+      - WEBHOOK_BASE_URL
+      - WS_ALLOWED_ORIGINS
+
+      # Everything else
+      - ADMIN_ALERTS_ENABLED
+      - ADMIN_ALERT_EMAIL
+      - ANALYTICS_SALT_SECRET
+      - DOCS_ARTICLE_BASE_URL
 
     # Migrations run on boot, so the database must be accepting connections
     # first. Without this the first deploy races and the container restarts.
