@@ -98,6 +98,8 @@ defmodule Tymeslot.Availability.BusinessHours do
     end
   end
 
+  @spec business_hours_from_day(Date.t(), day_availability() | nil, String.t(), String.t()) ::
+          {:ok, business_hours_result()} | {:error, String.t()}
   defp business_hours_from_day(date, day_availability, timezone, user_timezone) do
     case day_availability do
       %{is_available: true, start_time: start_time, end_time: end_time}
@@ -272,8 +274,11 @@ defmodule Tymeslot.Availability.BusinessHours do
   @spec business_day?(Date.t(), integer() | nil, Calculate.availability_config()) :: boolean()
   def business_day?(date, schedule_id, config \\ %{})
 
-  def business_day?(date, nil, _config) do
-    Date.day_of_week(date) in @fallback_working_days
+  def business_day?(date, nil, config) do
+    case frame_day(date, config) do
+      nil -> Date.day_of_week(date) in @fallback_working_days
+      day -> day.is_available
+    end
   end
 
   def business_day?(date, schedule_id, config) do
@@ -288,10 +293,20 @@ defmodule Tymeslot.Availability.BusinessHours do
 
       _no_override ->
         day_of_week = Date.day_of_week(date)
-        day_availability = lookup_day_availability(day_of_week, schedule_id, config)
+
+        day_availability =
+          frame_day(date, config) || lookup_day_availability(day_of_week, schedule_id, config)
 
         match?(%{is_available: true}, day_availability)
     end
+  end
+
+  # A trip's day, when one covers `date`, decides `business_day?/3` the same way
+  # it decides `get_business_hours_in_timezone/5`; the timezone passed to
+  # `OwnerFrame.for_date/3` is discarded, so its value never affects the result.
+  @spec frame_day(Date.t(), Calculate.availability_config()) :: day_availability() | nil
+  defp frame_day(date, config) do
+    OwnerFrame.for_date(date, Map.get(config, :owner_timezone, "Etc/UTC"), config).day
   end
 
   # Data lookup — uses preloaded collections when available, falls back to DB queries
