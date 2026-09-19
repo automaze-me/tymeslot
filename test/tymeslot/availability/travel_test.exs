@@ -98,6 +98,46 @@ defmodule Tymeslot.Availability.TravelTest do
 
       assert updated.end_date == ~D[2027-03-30]
     end
+
+    test "refuses a trip belonging to another profile" do
+      profile = insert(:profile)
+      other = insert(:profile)
+
+      period =
+        insert(:travel_period,
+          profile: other,
+          start_date: ~D[2027-03-14],
+          end_date: ~D[2027-03-28]
+        )
+
+      assert {:error, changeset} =
+               Travel.update_period(profile, period, %{end_date: ~D[2027-03-30]})
+
+      assert "does not belong to this profile" in errors_on(changeset).base
+
+      unchanged = List.first(Travel.for_window(other.id, ~D[2027-03-14], ~D[2027-03-14]))
+      assert unchanged.end_date == ~D[2027-03-28]
+    end
+  end
+
+  describe "normalise/1 (via create_period/2)" do
+    test "accepts string keys and drops unknown ones instead of raising" do
+      profile = insert(:profile)
+
+      # Shaped like a `phx-change` payload: real fields as strings, plus a
+      # LiveView `_unused_*` key that is not an existing atom.
+      assert {:ok, period} =
+               Travel.create_period(profile, %{
+                 "label" => "Berlin, spring",
+                 "start_date" => "2027-03-14",
+                 "end_date" => "2027-03-28",
+                 "timezone" => "Europe/Berlin",
+                 "_unused_label" => "whatever the browser sent"
+               })
+
+      assert period.label == "Berlin, spring"
+      assert period.timezone == "Europe/Berlin"
+    end
   end
 
   describe "for_window/3" do

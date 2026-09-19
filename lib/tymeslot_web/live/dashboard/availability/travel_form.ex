@@ -191,9 +191,14 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
       label: submitted["label"],
       start_date: submitted["start_date"],
       end_date: submitted["end_date"],
-      days: days_from_submitted(submitted["days"] || %{})
+      days: days_from_submitted(days_param(submitted["days"]))
     }
   end
+
+  # A crafted submit can send `days` as something other than a map (or omit
+  # it); either reads as "no days submitted" rather than raising below.
+  defp days_param(days) when is_map(days), do: days
+  defp days_param(_other), do: %{}
 
   defp days_from_period(period) do
     days = if is_list(period.days), do: period.days, else: []
@@ -208,16 +213,43 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
     end)
   end
 
+  # Only the seven weekday keys a real submit can send, each with a map
+  # value; anything else (a crafted `days[abc][...]` key, or a plain value
+  # at `days[1]`) is dropped rather than raising `String.to_integer/1` or a
+  # `Map` access error on a non-map value.
   defp days_from_submitted(days_params) do
-    Map.new(days_params, fn {day_of_week, attrs} ->
-      {String.to_integer(day_of_week),
-       %{
-         is_available: attrs["is_available"] in ["true", true],
-         start_time: attrs["start_time"],
-         end_time: attrs["end_time"]
-       }}
-    end)
+    days_params
+    |> Enum.flat_map(&submitted_day/1)
+    |> Map.new()
   end
+
+  defp submitted_day({key, attrs}) when is_map(attrs) do
+    case weekday_key(key) do
+      nil ->
+        []
+
+      day_of_week ->
+        [
+          {day_of_week,
+           %{
+             is_available: attrs["is_available"] in ["true", true],
+             start_time: attrs["start_time"],
+             end_time: attrs["end_time"]
+           }}
+        ]
+    end
+  end
+
+  defp submitted_day(_not_a_map), do: []
+
+  defp weekday_key(key) when is_binary(key) do
+    case Integer.parse(key) do
+      {day_of_week, ""} when day_of_week in 1..7 -> day_of_week
+      _other -> nil
+    end
+  end
+
+  defp weekday_key(_key), do: nil
 
   defp day_checked?(values, day_of_week) do
     case Map.get(values.days, day_of_week) do

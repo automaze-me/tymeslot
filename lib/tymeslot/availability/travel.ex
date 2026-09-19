@@ -9,6 +9,11 @@ defmodule Tymeslot.Availability.Travel do
   structurally unable to disagree about which trips apply — the same reason
   `Policy.slot_interval_minutes/1` exists.
 
+  `timezone_on/2` and `timezone_for_user_on/2` are the display-side
+  counterpart: which zone a profile (or a booking's organiser) is on for a
+  given date, used by the dashboard grid and by host-facing emails rather
+  than by the availability engine.
+
   Every write takes the profile struct rather than a profile id, because the
   availability cache is keyed by user and the struct already carries
   `user_id`. Deriving it from the id would mean an extra query, or a query
@@ -110,6 +115,7 @@ defmodule Tymeslot.Availability.Travel do
   def update_period(%ProfileSchema{} = profile, %TravelPeriodSchema{} = period, attrs) do
     period
     |> TravelPeriodSchema.changeset(normalise(attrs))
+    |> reject_foreign_profile(profile, period)
     |> reject_overlap(profile.id, period.id)
     |> TravelPeriodQueries.update_period()
     |> invalidate(profile)
@@ -141,11 +147,33 @@ defmodule Tymeslot.Availability.Travel do
 
   # Accepts either string or atom keys, so a LiveView form's params and a
   # direct caller's map both work without each call site converting.
+  # Whitelisted rather than converted with `String.to_existing_atom/1`: a
+  # `phx-change` payload carries LiveView's own `_unused_*` keys, which are
+  # not existing atoms, and would raise instead of being ignored.
+  @known_fields ~w(label start_date end_date timezone day_of_week is_available start_time end_time)a
+
   defp normalise(attrs) do
-    Map.new(attrs, fn
-      {key, value} when is_binary(key) -> {String.to_existing_atom(key), value}
-      {key, value} -> {key, value}
+    Enum.reduce(@known_fields, %{}, fn field, acc ->
+      string_field = Atom.to_string(field)
+
+      cond do
+        Map.has_key?(attrs, field) -> Map.put(acc, field, Map.fetch!(attrs, field))
+        Map.has_key?(attrs, string_field) -> Map.put(acc, field, Map.fetch!(attrs, string_field))
+        true -> acc
+      end
     end)
+  end
+
+  defp reject_foreign_profile(%Changeset{valid?: false} = changeset, _profile, _period),
+    do: changeset
+
+  defp reject_foreign_profile(changeset, %ProfileSchema{id: profile_id}, %TravelPeriodSchema{
+         profile_id: profile_id
+       }),
+       do: changeset
+
+  defp reject_foreign_profile(changeset, _profile, _period) do
+    Changeset.add_error(changeset, :base, "does not belong to this profile")
   end
 
   defp reject_overlap(%Changeset{valid?: false} = changeset, _profile_id, _exclude_id),

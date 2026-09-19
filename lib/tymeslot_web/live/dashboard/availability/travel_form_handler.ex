@@ -39,23 +39,19 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
   @spec handle_event(String.t(), map(), Phoenix.LiveView.Socket.t()) ::
           {:noreply, Phoenix.LiveView.Socket.t()}
   # `params["id"]` is absent for "add a trip" and a `phx-value-id` string for
-  # "edit" — both shapes travel_section.ex's single button emits.
-  def handle_event("show_travel_form", params, socket) do
-    period =
-      case params["id"] do
-        nil -> nil
-        id -> Enum.find(socket.assigns.travel_periods, &(&1.id == parse_id(id)))
-      end
+  # "edit" — both shapes travel_section.ex's single button emits. An id that
+  # does not resolve in the already-loaded list is a no-op, matching
+  # `DeleteModalHandler.with_travel_period/3`, rather than falling through to
+  # the add-a-trip form — which a submit would then save as a new trip.
+  def handle_event("show_travel_form", %{"id" => id}, socket) do
+    case Enum.find(socket.assigns.travel_periods, &(&1.id == parse_id(id))) do
+      nil -> noreply(socket)
+      period -> noreply(open_travel_form(socket, period))
+    end
+  end
 
-    socket
-    |> assign(:show_travel_form, true)
-    |> assign(:travel_form_period, period)
-    |> assign(:travel_form_submitted, nil)
-    |> assign(:travel_form_timezone, default_timezone(period, socket.assigns.profile))
-    |> assign(:travel_form_timezone_dropdown_open, false)
-    |> assign(:travel_form_timezone_search, "")
-    |> assign(:travel_form_errors, %{})
-    |> noreply()
+  def handle_event("show_travel_form", _params, socket) do
+    noreply(open_travel_form(socket, nil))
   end
 
   def handle_event("hide_travel_form", _params, socket) do
@@ -145,8 +141,19 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
   # whatever the host just typed on screen: `TravelForm` renders from it in
   # preference to the trip's saved fields whenever it is set, so a rejected
   # submission (an overlap, a bad day) never comes back blank.
+  defp open_travel_form(socket, period) do
+    socket
+    |> assign(:show_travel_form, true)
+    |> assign(:travel_form_period, period)
+    |> assign(:travel_form_submitted, nil)
+    |> assign(:travel_form_timezone, default_timezone(period, socket.assigns.profile))
+    |> assign(:travel_form_timezone_dropdown_open, false)
+    |> assign(:travel_form_timezone_search, "")
+    |> assign(:travel_form_errors, %{})
+  end
+
   defp finish_saving(socket, profile, period, params) do
-    case save_days(profile, period, params["days"] || %{}) do
+    case save_days(profile, period, days_param(params["days"])) do
       :ok ->
         Flash.info(dgettext("dashboard_availability", "Trip saved"))
 
@@ -184,7 +191,7 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
   end
 
   defp save_day(profile, period, days, day_of_week) do
-    submitted = Map.get(days, Integer.to_string(day_of_week), %{})
+    submitted = weekday_attrs(days, day_of_week)
     available = submitted["is_available"] in ["true", true]
 
     attrs = %{
@@ -199,6 +206,22 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
       {:error, changeset} -> {:error, day_of_week, changeset}
     end
   end
+
+  # A crafted `days[1]=x` submits a plain value rather than the expected
+  # `is_available`/`start_time`/`end_time` map; treat it as "nothing
+  # submitted for this day" instead of raising on `submitted["is_available"]`.
+  defp weekday_attrs(days, day_of_week) do
+    case Map.get(days, Integer.to_string(day_of_week)) do
+      attrs when is_map(attrs) -> attrs
+      _other -> %{}
+    end
+  end
+
+  # A crafted submit can send `days` as something other than a map (or omit
+  # it); either reads as "no days submitted" rather than raising in
+  # `weekday_attrs/2`.
+  defp days_param(days) when is_map(days), do: days
+  defp days_param(_other), do: %{}
 
   defp blank_to_nil(nil), do: nil
   defp blank_to_nil(""), do: nil

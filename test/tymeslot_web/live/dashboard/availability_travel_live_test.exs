@@ -294,6 +294,80 @@ defmodule TymeslotWeb.Dashboard.AvailabilityTravelLiveTest do
       assert html =~ ~s(name="days[1][end_time]" value="17:30")
     end
 
+    test "does not crash when a malformed days payload accompanies an overlap failure", %{
+      conn: conn,
+      profile: profile
+    } do
+      insert(:travel_period,
+        profile: profile,
+        label: "Existing trip",
+        start_date: ~D[2027-08-01],
+        end_date: ~D[2027-08-15],
+        timezone: "Europe/Berlin"
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/dashboard/availability")
+
+      view
+      |> element("button[phx-click='show_travel_form']", "Add a trip")
+      |> render_click()
+
+      select_travel_timezone(view, "Europe/Berlin")
+
+      # `days[abc][...]` (a non-numeric key) and `days[1]` (a non-map value)
+      # are both crafted-or-buggy shapes no real browser form can produce, so
+      # this goes straight to the form element rather than through `form/3`,
+      # which would refuse a payload shaped unlike the rendered inputs.
+      # Paired with an overlapping range, the rejected submit re-renders from
+      # these very params.
+      html =
+        view
+        |> element("#travel-form-modal form")
+        |> render_submit(%{
+          "label" => "Overlapping trip",
+          "start_date" => "2027-08-10",
+          "end_date" => "2027-08-20",
+          "timezone" => "Europe/Berlin",
+          "days" => %{
+            "abc" => %{"is_available" => "true"},
+            "1" => "not-a-map"
+          }
+        })
+
+      assert Process.alive?(view.pid)
+      assert html =~ "overlaps an existing trip"
+      assert length(Travel.list_for_profile(profile.id)) == 1
+    end
+
+    test "an unknown trip id does not reset an in-progress edit to a blank add form", %{
+      conn: conn,
+      profile: profile
+    } do
+      period =
+        insert(:travel_period,
+          profile: profile,
+          label: "Lisbon retreat",
+          start_date: ~D[2027-05-01],
+          end_date: ~D[2027-05-10],
+          timezone: "Europe/Lisbon"
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/dashboard/availability")
+
+      view
+      |> element("button[phx-click='show_travel_form'][phx-value-id='#{period.id}']")
+      |> render_click()
+
+      html =
+        view
+        |> element("button[phx-click='show_travel_form']", "Add a trip")
+        |> render_click(%{"id" => "999999"})
+
+      assert html =~ "Edit trip"
+      assert html =~ "Lisbon retreat"
+      refute html =~ "New trip"
+    end
+
     test "warns on the trip list when a trip has no bookable hours", %{
       conn: conn,
       profile: profile

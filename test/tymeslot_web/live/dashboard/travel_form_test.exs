@@ -86,6 +86,27 @@ defmodule TymeslotWeb.Live.Dashboard.TravelFormTest do
       end
     end
 
+    test "tolerates a malformed :submitted days payload instead of crashing" do
+      # `days[abc][is_available]=true` and `days[1]=x` are both shapes a
+      # crafted (or merely buggy) form submit can produce: a non-numeric
+      # weekday key, and a non-map value at a numeric key.
+      submitted = %{
+        "label" => "Overlapping trip",
+        "start_date" => "2027-08-10",
+        "end_date" => "2027-08-20",
+        "days" => %{
+          "abc" => %{"is_available" => "true"},
+          "1" => "not-a-map",
+          "2" => %{"is_available" => "true", "start_time" => "09:00", "end_time" => "17:00"}
+        }
+      }
+
+      html = render_component(&TravelForm.travel_form_modal/1, assigns(%{submitted: submitted}))
+
+      assert html =~ ~s(name="label" value="Overlapping trip")
+      assert html =~ ~s(name="days[2][is_available]" value="true" checked)
+    end
+
     test "shows a field error" do
       html =
         render_component(

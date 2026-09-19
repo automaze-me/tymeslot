@@ -183,7 +183,7 @@ and delete.
 
 "What time is it for me now" and "when will this meeting be for me" are
 different questions and get different dates, through one resolver:
-`Profiles.timezone_on(profile, date)` — the trip covering that date, else the
+`Travel.timezone_on(profile, date)` — the trip covering that date, else the
 profile zone. Unlike the availability path, these callers hold no
 `availability_config`, so this resolver reads through `TravelPeriodQueries`
 directly rather than expecting prefetched trips.
@@ -204,6 +204,24 @@ timestamp (`utc_datetime` throughout).
 
 A dashboard banner names the active trip's zone whenever a trip covers today.
 Without it the grid silently shifts by hours and reads as a bug.
+
+## Known limitations
+
+Two edge cases the implementation accepts rather than solves:
+
+- **All-day events anchor to the home zone during a trip.**
+  `Events.convert_events_to_timezone/3` anchors all-day events to midnight in
+  `owner_timezone` — the home zone. Both the display and submit paths pass
+  the same zone, so they still agree with each other; the effect is that an
+  all-day blocking event during a trip blocks a 24-hour window offset by the
+  zone difference. Negligible for whole-hour US/Europe offsets and daytime
+  trip hours, but real.
+- **The slot grid's phase is anchored to the home zone.**
+  `TimeSlots.align_to_interval/3` aligns to the zone `Calculate` passes it,
+  which is the home zone, so a trip's zone reaches the *window* but not the
+  grid *phase*. This only bites fractional-offset zones combined with
+  intervals that do not divide the offset — 20-minute slots in a UTC+5:30
+  zone, for example. Irrelevant to whole-hour offsets.
 
 ## UI
 
@@ -243,22 +261,43 @@ tag from `test/support/tag_taxonomy.ex` (`:unit`, `:queries`, `:schema`,
 New (no rebase conflict surface): the five modules above, one migration, the
 trip-editor components, and their tests.
 
-Edited, load-bearing four:
+Edited, load-bearing:
 
 - `lib/tymeslot/availability/business_hours.ex` — resolve the frame per date
 - `lib/tymeslot/availability/calculate.ex` — `prefetch_travel_periods/4`, typedoc
 - `lib/tymeslot/bookings/policy.ex` — trips into `scheduling_config/2`
+- `lib/tymeslot/profiles.ex` — `profile_id` into `profile_settings`, which
+  `scheduling_config/2` reads to reach it
 - `lib/tymeslot_web/live/scheduling/availability_helpers.ex` — trips into
   `schedule_config/4`
 
 Edited, display and UI:
 
-- `lib/tymeslot/profiles/timezone.ex` — `timezone_on/2`
 - `lib/tymeslot/emails/appointment_builder.ex`
 - `lib/tymeslot/emails/email_service/calendar_emails.ex`
+- `lib/tymeslot/emails/templates/booking_approval_request.ex` and
+  `lib/tymeslot/emails/templates/calendar_sync_error.ex` — the third and
+  fourth host-facing zone resolvers, missing from the original list
 - `lib/tymeslot_web/live/dashboard/calendar_grid/*` — grid zone assign
-- `lib/tymeslot_web/live/dashboard/calendar_grid/desktop_reminder_feed.ex`
 - `lib/tymeslot_web/live/dashboard/schedule_settings_component.ex`
+- `lib/tymeslot_web/hooks/modal_hook.ex` — one line registering the
+  delete-travel-period modal
+
+Edited, a correctness fix found during implementation rather than planned up
+front:
+
+- `lib/tymeslot_web/live/scheduling/calendar_helpers.ex` — without it, the
+  month grid and week strip disagree with the submit path about a trip
+
+`timezone_on/2` and `timezone_for_user_on/2` (used by the two email templates
+above and by the dashboard grid) live in the new
+`lib/tymeslot/availability/travel.ex` — one of "the five modules above" —
+rather than in `lib/tymeslot/profiles/timezone.ex` as originally planned:
+that module's moduledoc restricts it to pure functions with no data access,
+and these two read trips from the database. `lib/tymeslot/profiles/timezone.ex`
+itself was never touched, and neither was `desktop_reminder_feed.ex`: it
+consumes the zone `data_loading.ex` already resolves, and needed no change
+of its own.
 
 ## Definition of done
 
