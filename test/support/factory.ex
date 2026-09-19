@@ -10,6 +10,8 @@ defmodule Tymeslot.Factory do
   alias Tymeslot.Availability.AvailabilityBreakSchema
   alias Tymeslot.Availability.AvailabilityOverrideSchema
   alias Tymeslot.Availability.AvailabilityScheduleSchema
+  alias Tymeslot.Availability.TravelPeriodDaySchema
+  alias Tymeslot.Availability.TravelPeriodSchema
   alias Tymeslot.Availability.WeeklyAvailabilitySchema
   alias Tymeslot.Integrations.Calendar.CalendarIntegrationSchema
   alias Tymeslot.Integrations.Calendar.ProviderCalendarEventSchema
@@ -267,6 +269,29 @@ defmodule Tymeslot.Factory do
       override_type: "unavailable",
       reason: "Out of office",
       schedule: build(:availability_schedule)
+    }
+  end
+
+  @spec travel_period_factory() :: Tymeslot.Availability.TravelPeriodSchema.t()
+  def travel_period_factory do
+    %TravelPeriodSchema{
+      label: sequence(:travel_period_label, &"Trip #{&1}"),
+      start_date: Date.add(Date.utc_today(), 30),
+      end_date: Date.add(Date.utc_today(), 44),
+      timezone: "Europe/Berlin",
+      profile: build(:profile)
+    }
+  end
+
+  @spec travel_period_day_factory() :: Tymeslot.Availability.TravelPeriodDaySchema.t()
+  def travel_period_day_factory do
+    %TravelPeriodDaySchema{
+      # Wednesday
+      day_of_week: 3,
+      is_available: true,
+      start_time: ~T[10:00:00],
+      end_time: ~T[16:00:00],
+      travel_period: build(:travel_period)
     }
   end
 
