@@ -3,11 +3,13 @@ defmodule Tymeslot.Emails.EmailService.CalendarEmails do
 
   require Logger
 
+  alias Tymeslot.Availability.Travel
   alias Tymeslot.Emails.Delivery
   alias Tymeslot.Emails.RecipientLocale
   alias Tymeslot.Emails.Shared.MjmlEmail
   alias Tymeslot.Infrastructure.AdminAlerts
   alias Tymeslot.Profiles
+  alias Tymeslot.Utils.DateTimeUtils
 
   alias Tymeslot.Emails.Templates.{
     CalendarInvitation,
@@ -132,6 +134,20 @@ defmodule Tymeslot.Emails.EmailService.CalendarEmails do
   end
 
   defp resolve_owner_timezone(%{organizer_user_id: nil}), do: Profiles.get_default_timezone()
+
+  # See the tradeoff/edge-case comment on
+  # `Tymeslot.Emails.AppointmentBuilder.owner_timezone/1`: the meeting's date
+  # is read in the host's home zone (not UTC) before asking `Travel` whether a
+  # trip is in effect, at the cost of a second profile lookup.
+  defp resolve_owner_timezone(%{organizer_user_id: id, start_time: %DateTime{} = start_time}) do
+    home_timezone = Profiles.get_user_timezone(id)
+
+    meeting_date =
+      start_time |> DateTimeUtils.convert_to_timezone(home_timezone) |> DateTime.to_date()
+
+    Travel.timezone_for_user_on(id, meeting_date)
+  end
+
   defp resolve_owner_timezone(%{organizer_user_id: id}), do: Profiles.get_user_timezone(id)
   defp resolve_owner_timezone(_meeting), do: Profiles.get_default_timezone()
 end

@@ -5,6 +5,7 @@ defmodule Tymeslot.Emails.AppointmentBuilder do
   """
 
   require Logger
+  alias Tymeslot.Availability.Travel
   alias Tymeslot.CalendarGrid
   alias Tymeslot.Emails.Shared.BookingRequestLocation
   alias Tymeslot.Locales
@@ -66,6 +67,18 @@ defmodule Tymeslot.Emails.AppointmentBuilder do
 
   defp booking_payment_for(_meeting), do: nil
 
+  # Keyed on the meeting's own date rather than today: a February booking for a
+  # March trip is announced in the zone the host will be in when it happens.
+  # The date is read in the host's *home* zone, not UTC and not the
+  # attendee's zone: reading it in UTC would occasionally roll the date to
+  # the day before or after the host's own wall-clock day, which can pick the
+  # wrong trip right at a trip boundary. That means resolving the home zone
+  # first (a second profile lookup, since `Travel.timezone_for_user_on/2`
+  # loads the profile again to check for a trip) — acceptable here, since
+  # sending an email is not a hot path. A residual edge remains unsolved: a
+  # meeting within a few hours of midnight on a trip's first or last day can
+  # still land on the adjacent date if the host's home-zone day and the trip
+  # zone's day disagree.
   defp owner_timezone(meeting) do
     case meeting.organizer_user_id do
       nil ->
@@ -76,7 +89,20 @@ defmodule Tymeslot.Emails.AppointmentBuilder do
         @default_timezone
 
       user_id ->
-        Profiles.get_user_timezone(user_id)
+        home_timezone = Profiles.get_user_timezone(user_id)
+
+        case meeting.start_time do
+          %DateTime{} = start_time ->
+            meeting_date =
+              start_time
+              |> DateTimeUtils.convert_to_timezone(home_timezone)
+              |> DateTime.to_date()
+
+            Travel.timezone_for_user_on(user_id, meeting_date)
+
+          _no_start_time ->
+            home_timezone
+        end
     end
   end
 
