@@ -12,49 +12,56 @@ application behaviour.
 
 - [Which shape to deploy](#which-shape-to-deploy)
 - [Prerequisites](#prerequisites)
-- [Step 1 — Create the project and the database](#step-1--create-the-project-and-the-database)
-- [Step 2 — Create the application](#step-2--create-the-application)
-- [Step 3 — Environment variables](#step-3--environment-variables)
-- [Step 4 — Persistent storage](#step-4--persistent-storage)
-- [Step 5 — Domain and TLS](#step-5--domain-and-tls)
-- [Step 6 — Deploy and verify](#step-6--deploy-and-verify)
-- [Step 7 — First account](#step-7--first-account)
+- [Step 1 — Create the Compose service](#step-1--create-the-compose-service)
+- [Step 2 — Environment variables](#step-2--environment-variables)
+- [Step 3 — Domain and TLS](#step-3--domain-and-tls)
+- [Step 4 — Deploy and verify](#step-4--deploy-and-verify)
+- [Step 5 — First account](#step-5--first-account)
 - [Email](#email)
 - [Calendar OAuth callbacks](#calendar-oauth-callbacks)
 - [Keeping the fork current](#keeping-the-fork-current)
 - [Backups](#backups)
 - [Troubleshooting](#troubleshooting)
+- [Appendix — the Application route](#appendix--the-application-route)
+- [Appendix — running the same file without Dokploy](#appendix--running-the-same-file-without-dokploy)
 
 ---
 
 ## Which shape to deploy
 
 The published image ships **with PostgreSQL inside the container**, because the
-upstream quick-start is a single `docker run`. That is the wrong shape on
-Dokploy, which manages databases as first-class services with their own backups
-and lifecycle.
+upstream quick-start is a single `docker run`. That is the wrong shape here:
+Dokploy manages databases as services with their own lifecycle, and a database
+inside the app container cannot be backed up or restarted independently of it.
 
 `Dockerfile.docker` is multi-stage and already provides the right target:
 
-| Target | Contains | Use on Dokploy |
+| Target | Contains | Use here |
 | --- | --- | --- |
-| `release-slim` | The app only, no database server | **Yes** — pair with a Dokploy Postgres |
+| `release-slim` | The app only, no database server | **Yes** |
 | `release` | `release-slim` plus an embedded PostgreSQL | No |
 
-Dokploy's Dockerfile build type has a **Docker Build Stage** field, so selecting
-`release-slim` needs no changes to the repo.
-
-The rest of this guide deploys:
+This fork ships **`docker-compose.dokploy.yml`**, which wires up the whole
+deployment: the app built from the `release-slim` target, its own PostgreSQL on
+a private network, both volumes, a healthcheck gating the app's first boot on
+the database being ready, and the `dokploy-network` attachment Traefik routes
+over.
 
 ```
-Dokploy project "tymeslot"
-├── Postgres service   (Dokploy-managed, backed up by Dokploy)
-└── Application        (this fork, built from Dockerfile.docker, target release-slim)
+Dokploy Compose service
+├── tymeslot   built from Dockerfile.docker, target release-slim
+│                on dokploy-network (Traefik) + internal
+└── postgres   postgres:17-alpine, on internal only — never reachable
+                 from Traefik or from other Dokploy projects
 ```
 
-Migrations run automatically on every boot — `start-docker.sh` runs
-`Ecto.Migrator` before starting the web server, so a redeploy after a schema
-change needs no manual step.
+Everything that can be derived, is. The database user and name are fixed as
+`tymeslot`, the host is the compose service name, and `DATABASE_URL` is built
+from those plus one password variable. Migrations run automatically on every
+boot, so a redeploy after a schema change needs no manual step.
+
+If you would rather use a Dokploy-managed database and a plain Application
+instead of Compose, see [the appendix](#appendix--the-application-route).
 
 ## Prerequisites
 
@@ -69,175 +76,141 @@ change needs no manual step.
 - Read access to `automaze-me/tymeslot`. It is a public fork, so no deploy key
   is needed; add one in Dokploy's Git settings if you later make it private.
 
-## Step 1 — Create the project and the database
+## Step 1 — Create the Compose service
 
 1. Create a Dokploy **project**, e.g. `tymeslot`.
-2. Inside it, create a **PostgreSQL** database service. Postgres 14 or newer;
-   17 matches what upstream's own compose file uses.
-3. Note the database name, user and password, and the **internal** host Dokploy
-   reports for the service. Dokploy shows the connection details on the
-   database's own page — use the internal/private values, not the public ones:
-   the app reaches Postgres over Dokploy's Docker network, so the database never
-   needs a published port.
-
-Leaving the database unexposed to the internet is the single biggest security
-win of this shape over the embedded one. Don't add a public port unless you
-genuinely need external access for backups.
-
-## Step 2 — Create the application
-
-Create an **Application** in the same project.
-
-**Source:**
+2. Inside it, create a **Compose** service.
+3. Point it at this fork:
 
 | Field | Value |
 | --- | --- |
 | Repository | `https://github.com/automaze-me/tymeslot` |
 | Branch | `main`, or `feature/travel-periods` to run the travel-periods work |
+| Compose Path | `docker-compose.dokploy.yml` |
 
-**Build:**
+Use Dokploy's **Docker Compose** mode rather than Docker Stack: the file builds
+from source, and `build` is unavailable under Stack.
 
-| Field | Value |
-| --- | --- |
-| Build Type | `Dockerfile` |
-| Dockerfile Path | `Dockerfile.docker` |
-| Docker Context Path | `.` |
-| Docker Build Stage | `release-slim` |
+There is nothing to configure for storage. The compose file declares both
+volumes, and Dokploy namespaces them per project — which is deliberate, because
+upstream's own compose files pin the names `tymeslot_data` and `tymeslot_pg`,
+and reusing those would hand `postgres:17-alpine` a data directory created by a
+different PostgreSQL packaging, which it refuses to open.
 
-The build stage is the important one. Leave it blank and you get the `release`
-target, which starts an embedded PostgreSQL alongside the external one — two
-databases, one of them ignored, and a confusing log.
+## Step 2 — Environment variables
 
-## Step 3 — Environment variables
+Paste this into the Compose service's Environment tab and fill in the values.
+Five variables are genuinely required; the rest are email and optional OAuth.
 
-Set these on the application's Environment tab.
+```dotenv
+# --- required ---
+PHX_HOST=booking.example.com
+SECRET_KEY_BASE=
+DATA_ENCRYPTION_KEY=
+POSTGRES_PASSWORD=
+SMTP_HOST=smtp.example.com
 
-### Required — the app refuses to boot without them
+# --- email: the From address must be on a domain your relay may send for ---
+EMAIL_FROM_ADDRESS=hello@example.com
+# EMAIL_FROM_NAME defaults to "Tymeslot"
+SMTP_USERNAME=
+SMTP_PASSWORD=
+```
 
-| Variable | Value | Notes |
-| --- | --- | --- |
-| `SECRET_KEY_BASE` | 64 random bytes, base64 | `openssl rand -base64 64 \| tr -d '\n'` |
-| `PHX_HOST` | `booking.example.com` | Hostname only — no scheme, no trailing slash |
-| `EMAIL_FROM_ADDRESS` | `hello@example.com` | Raises at boot if missing |
-| `EMAIL_FROM_NAME` | `Tymeslot` | Raises at boot if missing |
-| `SMTP_HOST` | your SMTP host | Required in practice — see [Email](#email) |
+Generate the secrets:
 
-### Database
+```bash
+openssl rand -base64 64 | tr -d '\n'   # SECRET_KEY_BASE
+openssl rand -base64 48 | tr -d '\n'   # DATA_ENCRYPTION_KEY
+openssl rand -hex 32                    # POSTGRES_PASSWORD
+```
 
-| Variable | Value |
-| --- | --- |
-| `DATABASE_HOST` | the internal host from Step 1 |
-| `DATABASE_PORT` | `5432` |
-| `POSTGRES_DB` | your database name |
-| `POSTGRES_USER` | your database user |
-| `POSTGRES_PASSWORD` | your database password |
-| `TYMESLOT_EMBEDDED_DB` | `false` |
+**Use hex for `POSTGRES_PASSWORD`.** It is interpolated into `DATABASE_URL`, and
+hex is URL-safe by construction — a base64 password can contain `/` or `+`,
+which corrupt a connection URL and produce a confusing authentication failure.
+If you must use a password with URL-special characters, the compose file carries
+a commented block of discrete `DATABASE_HOST`/`POSTGRES_*` variables that need
+no escaping; swap to those and delete the `DATABASE_URL` line.
 
-`DATABASE_URL=postgres://user:password@host:5432/dbname` works instead of the
-five discrete variables and takes precedence over them.
+**`PHX_HOST` must match the Domain's Host exactly** — hostname only, no scheme,
+no trailing slash. Phoenix builds every absolute URL from it: booking links,
+email links, OAuth redirect URIs. Get it wrong and the site loads while every
+link it emits points somewhere else.
 
-`TYMESLOT_EMBEDDED_DB=false` is not strictly required, but set it. On the slim
-target there is no bundled database to fall back to, and this makes a
-misconfiguration fail with an explicit "no database configured" message instead
-of a confusing PostgreSQL initialisation error.
+**`DATA_ENCRYPTION_KEY` must stay stable for the life of the deployment.** It
+encrypts stored calendar credentials — OAuth tokens, CalDAV and Exchange
+passwords. Omit it and the app warns on every boot and derives the key from
+`SECRET_KEY_BASE`, permanently coupling the two so you could never rotate the
+cookie secret without destroying every stored credential. **Losing it makes
+those credentials permanently undecryptable**, so back it up with the database,
+not with your config. Adding it to an instance that has run without it requires
+the re-encryption sweep in README-Docker.md under "Data-at-rest encryption".
 
-### Strongly recommended
-
-| Variable | Value | Notes |
-| --- | --- | --- |
-| `DATA_ENCRYPTION_KEY` | 48 random bytes, base64 | `openssl rand -base64 48 \| tr -d '\n'` |
-| `DEPLOYMENT_TYPE` | `docker` | |
-| `PORT` | `4000` | Only if you want something other than the default |
-
-**`DATA_ENCRYPTION_KEY` deserves care.** It encrypts stored credentials —
-calendar OAuth tokens, CalDAV and Exchange passwords. Omit it and the app warns
-at boot and falls back to a key derived from `SECRET_KEY_BASE`, which means you
-can never rotate `SECRET_KEY_BASE` without destroying every stored credential.
-Set it from the start. **Losing it makes stored credentials permanently
-undecryptable** — treat it like a database backup, not like a config value. If
-you add it to an instance that has been running without it, run the
-re-encryption sweep described in README-Docker.md under "Data-at-rest
-encryption".
-
-### Email
-
-| Variable | Value | Notes |
-| --- | --- | --- |
-| `SMTP_HOST` | your SMTP host | Required; raises if absent |
-| `SMTP_PORT` | `587` | Optional, defaults to 587 |
-| `SMTP_USERNAME` | your SMTP user | Must be set together with the password |
-| `SMTP_PASSWORD` | your SMTP password | Must be set together with the username |
-| `SMTP_SSL` | `true` | Only for implicit TLS, usually port 465. Left unset, the port decides |
-| `SMTP_TLS_VERIFY` | `none` | Last resort for a self-signed relay certificate. Defaults to verifying |
-| `SMTP_CACERTFILE` | path to a CA bundle | Preferable to `SMTP_TLS_VERIFY=none` for a private CA |
-
-Setting a username without a password, or the reverse, raises at boot rather
-than sending unauthenticated.
+Everything else the app needs is set in the compose file and should not be
+duplicated here: `DEPLOYMENT_TYPE`, `TYMESLOT_EMBEDDED_DB`, `DATABASE_URL`,
+`SMTP_PORT` (587), `EMAIL_FROM_NAME`, and the Postgres user and database name.
 
 ### Optional — calendar OAuth
 
-Only needed for Google Calendar and Microsoft 365 connections. Exchange (EWS),
+Needed only for Google Calendar and Microsoft 365 connections. Exchange (EWS),
 CalDAV, Nextcloud, Radicale, Baikal, Zimbra, mailbox.org, Apple and ICS feeds
 need none of these and are configured entirely in the app's UI.
 
-| Variable | Notes |
-| --- | --- |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_STATE_SECRET` | The state secret is yours to generate, not Google's |
-| `OUTLOOK_CLIENT_ID`, `OUTLOOK_CLIENT_SECRET`, `OUTLOOK_STATE_SECRET` | Serves both Outlook Calendar and Teams |
+```dotenv
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_STATE_SECRET=
+OUTLOOK_CLIENT_ID=
+OUTLOOK_CLIENT_SECRET=
+OUTLOOK_STATE_SECRET=
+```
+
+The two `*_STATE_SECRET` values are yours to generate, not issued by Google or
+Microsoft: `openssl rand -base64 32 | tr -d '\n'`.
 
 Do **not** set the generic `OAUTH_*` variables unless you want OIDC single
 sign-on for logging into Tymeslot itself. They are unrelated to calendars, and
 `ENABLE_OAUTH_AUTH=true` with an incomplete set raises at boot.
 
-## Step 4 — Persistent storage
+## Step 3 — Domain and TLS
 
-Add a **volume mount** on the application:
-
-| Field | Value |
-| --- | --- |
-| Mount path | `/app/data` |
-
-This holds operator state that must outlive a redeploy. Without it, every
-deployment starts with an empty data directory.
-
-The database needs no mount here — Dokploy manages the Postgres service's own
-storage.
-
-## Step 5 — Domain and TLS
-
-On the application's Domains tab:
+On the Compose service's Domains tab:
 
 | Field | Value |
 | --- | --- |
-| Host | `booking.example.com` — must match `PHX_HOST` exactly |
+| Service Name | `tymeslot` |
+| Host | `booking.example.com` — must match `PHX_HOST` |
 | Path | `/` |
-| Container Port | `4000` (or your `PORT`) |
+| Container Port | `4000` |
 | HTTPS | enabled |
 | Certificate | `Let's Encrypt` |
 
-A mismatch between `Host` and `PHX_HOST` is the most common cause of a working
-site that generates broken links: Phoenix builds absolute URLs — booking links,
-email links, OAuth redirect URIs — from `PHX_HOST`, not from the request.
+Dokploy implements Compose domains as Traefik Docker labels rather than as
+hot-reloaded configuration, so **redeploy after changing anything here** — a
+domain edit alone does not take effect.
 
-The app listens on all interfaces by default (`LISTEN_IP` defaults to `::`), so
-Traefik reaches it without further configuration.
+The compose file uses `expose` rather than `ports` on purpose: the app is
+reachable over `dokploy-network` for Traefik and is never published on the
+host. The database is not on that network at all.
 
-## Step 6 — Deploy and verify
+## Step 4 — Deploy and verify
 
 Deploy, then read the logs. A healthy first boot shows, in order:
 
-1. `✓ External database detected: <host>:5432` followed by
-   `Skipping embedded PostgreSQL initialization` — confirms the slim target
-   found your Dokploy Postgres. If you instead see PostgreSQL initialising, the
-   Docker Build Stage is not `release-slim`, or the database variables did not
-   reach the container.
-2. Migration output. On a fresh database this is the full migration history and
+1. The `postgres` service passing its healthcheck. The app waits on it, so
+   nothing else happens until it does.
+2. `✓ External database detected via DATABASE_URL: postgres://***:***@postgres:5432/tymeslot`
+   followed by `Skipping embedded PostgreSQL initialization` — this confirms the
+   slim target is in use and found the database. If you instead see PostgreSQL
+   initialising, the build target is not `release-slim`. The credentials in that
+   line are redacted by the entrypoint, not by you.
+3. Migration output. On a fresh database this is the full migration history and
    takes a little while.
-3. Phoenix starting and listening on your `PORT`.
+4. Phoenix starting and listening on port 4000.
 
 Then load `https://booking.example.com`.
 
-## Step 7 — First account
+## Step 5 — First account
 
 **The first account created becomes the administrator.** Register yours
 immediately after the first successful deploy, before the instance is
@@ -262,8 +235,8 @@ unset, which defaults to SMTP, or set it to a real provider. A development-only
 adapter raises at boot in production, but `test` is accepted and drops
 everything — a working deploy that sends nothing.
 
-With the `SMTP_*` variables from Step 3 set, send yourself a test booking before
-you consider the instance live.
+With the `SMTP_*` variables from [Step 2](#step-2--environment-variables) set,
+send yourself a test booking before you consider the instance live.
 
 ## Calendar OAuth callbacks
 
@@ -334,6 +307,10 @@ Test a restore at least once. An untested backup is a hypothesis.
 | Symptom | Cause |
 | --- | --- |
 | Build killed, no clear error | Out of memory. Needs ~2 GB for `mix release` and asset compilation. |
+| `network dokploy-network declared as external, but could not be found` | Dokploy's shared network is missing or named differently on your install. Check `docker network ls` on the VPS and correct the name at the bottom of the compose file. |
+| `build` ignored, or "unsupported" on deploy | The service is running in Docker Stack mode. The file builds from source, so it needs Docker Compose mode. |
+| Domain change had no effect | Compose domains are Traefik labels, not hot-reloaded. Redeploy. |
+| Postgres authentication failures with a base64 password | `/` or `+` in the password corrupted `DATABASE_URL`. Use `openssl rand -hex 32`, or switch to the discrete variables. |
 | Logs show PostgreSQL initialising | Docker Build Stage is not `release-slim`, or the database variables did not reach the container. |
 | `no database configured` and exit | `TYMESLOT_EMBEDDED_DB=false` with no reachable database. Check `DATABASE_HOST` against Dokploy's internal host. |
 | `environment variable PHX_HOST is missing` | Exactly that. It has no default. |
@@ -371,6 +348,89 @@ The application-side facts above were read from the code rather than assumed:
 
 Dokploy's field names — Build Type, Dockerfile Path, Docker Context Path, Docker
 Build Stage, and the Domain fields Host, Path, Container Port, HTTPS,
-Certificate — are taken from Dokploy's documentation. Dokploy moves quickly, so
-if a field has been renamed in your version, the value to supply is still the
-one in the tables above.
+Certificate — are taken from Dokploy's documentation, as is the requirement to
+join `dokploy-network` and to prefer `expose` over `ports`. Dokploy moves
+quickly, so if a field has been renamed in your version, the value to supply is
+still the one in the tables above.
+
+`docker-compose.dokploy.yml` was validated with `docker compose config`: the
+derived `DATABASE_URL` interpolates to
+`postgres://tymeslot:<password>@postgres:5432/tymeslot`, `dokploy-network`
+resolves as external, and the volumes namespace per project rather than
+colliding with upstream's pinned names.
+
+---
+
+## Appendix — the Application route
+
+If you prefer a Dokploy-managed database with its own backup UI, and a plain
+Application rather than Compose, the same deployment works without the compose
+file.
+
+1. Create a **PostgreSQL** database service in the project. Note the database
+   name, user, password and the **internal** host Dokploy reports on the
+   database's own page — the app reaches it over Dokploy's network, so it needs
+   no published port.
+
+2. Create an **Application** pointing at this fork, and set:
+
+| Field | Value |
+| --- | --- |
+| Build Type | `Dockerfile` |
+| Dockerfile Path | `Dockerfile.docker` |
+| Docker Context Path | `.` |
+| Docker Build Stage | `release-slim` |
+
+The build stage is the important one. Leave it blank and you get the `release`
+target, which starts an embedded PostgreSQL alongside the managed one.
+
+3. Set the variables from [Step 2](#step-2--environment-variables), and
+   additionally — since no compose file is deriving them:
+
+| Variable | Value |
+| --- | --- |
+| `DEPLOYMENT_TYPE` | `docker` |
+| `TYMESLOT_EMBEDDED_DB` | `false` |
+| `DATABASE_HOST` | the internal host from step 1 |
+| `DATABASE_PORT` | `5432` |
+| `POSTGRES_DB` | your database name |
+| `POSTGRES_USER` | your database user |
+| `POSTGRES_PASSWORD` | your database password |
+| `SMTP_PORT` | `587` |
+| `EMAIL_FROM_NAME` | `Tymeslot` |
+
+A single `DATABASE_URL` works in place of the five database variables and takes
+precedence over them.
+
+4. Add a **volume mount** at `/app/data`. Without it every deployment starts
+   with an empty data directory.
+
+5. Domain and TLS as in [Step 3](#step-3--domain-and-tls), except that an
+   Application has no Service Name field and its Traefik configuration is
+   hot-reloaded, so a domain change needs no redeploy.
+
+## Appendix — running the same file without Dokploy
+
+`docker-compose.dokploy.yml` is usable on a plain Docker host with two changes:
+
+1. Remove the `dokploy-network` entry from the `tymeslot` service's `networks`
+   list and from the top-level `networks` block — there is no Dokploy network to
+   join, and Compose fails on a missing external network.
+2. Replace `expose` with a published port, so something can reach it:
+
+```yaml
+    ports:
+      - "4000:4000"
+```
+
+Then supply the variables from Step 2 in a `.env` file beside the compose file
+and run:
+
+```bash
+docker compose -f docker-compose.dokploy.yml up -d --build
+```
+
+Put a TLS-terminating reverse proxy in front of it; the app expects to be
+reached over HTTPS at `PHX_HOST`. For a plain-Docker deployment upstream's
+`docker-compose.with-postgres.yml` is the better starting point, since it uses
+the published image rather than building from source.

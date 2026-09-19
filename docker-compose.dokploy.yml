@@ -1,0 +1,152 @@
+# Tymeslot on Dokploy — application plus its own PostgreSQL.
+#
+# A fork-only file (automaze-me/tymeslot); not upstream. See README-Dokploy.md.
+#
+# Deploy as a Dokploy **Compose** service with Compose Path
+# `docker-compose.dokploy.yml`, then set the variables below on the
+# Environment tab.
+#
+# Only five variables have to be supplied; everything else is derived here:
+#
+#   PHX_HOST              booking.example.com       (no scheme, no trailing slash)
+#   SECRET_KEY_BASE       openssl rand -base64 64 | tr -d '\n'
+#   DATA_ENCRYPTION_KEY   openssl rand -base64 48 | tr -d '\n'
+#   POSTGRES_PASSWORD     openssl rand -hex 32
+#   SMTP_HOST             smtp.example.com
+#
+# Plus, in practice, EMAIL_FROM_ADDRESS and your SMTP credentials — see the
+# comments on each below.
+#
+# Use `openssl rand -hex 32` for POSTGRES_PASSWORD specifically. It is
+# interpolated into DATABASE_URL below, and hex is URL-safe by construction;
+# a base64 password can contain `/` or `+`, which corrupt a connection URL.
+# If you must use a password containing URL-special characters, delete the
+# DATABASE_URL line and uncomment the discrete block beneath it, which needs
+# no escaping.
+#
+# DATA_ENCRYPTION_KEY must stay stable for the life of the deployment. It
+# encrypts stored calendar credentials; losing it makes them permanently
+# undecryptable. Back it up alongside the database, not with your config.
+
+services:
+  tymeslot:
+    build:
+      context: .
+      dockerfile: Dockerfile.docker
+      # The slim target carries no PostgreSQL server. Omit this and you get the
+      # default `release` target, which starts an embedded database alongside
+      # the one below — two databases, one silently ignored.
+      target: release-slim
+    restart: unless-stopped
+
+    # `expose`, never `ports`: Traefik reaches the container over
+    # dokploy-network, and publishing to the host would bypass it.
+    expose:
+      - "4000"
+
+    environment:
+      DEPLOYMENT_TYPE: docker
+
+      # No bundled database on the slim target. Set explicitly so a
+      # misconfiguration fails with "no database configured" rather than a
+      # confusing PostgreSQL initialisation error.
+      TYMESLOT_EMBEDDED_DB: "false"
+
+      # Derived: the user and database name are fixed below, the host is this
+      # project's postgres service, and the password is the one variable you
+      # supply. Ecto parses this and merges it over any discrete settings, so
+      # it is the single source of truth for the connection.
+      DATABASE_URL: postgres://tymeslot:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/tymeslot
+
+      # Alternative to DATABASE_URL, for a password with URL-special
+      # characters. Uncomment these four and delete DATABASE_URL above.
+      # DATABASE_HOST: postgres
+      # DATABASE_PORT: "5432"
+      # POSTGRES_DB: tymeslot
+      # POSTGRES_USER: tymeslot
+      # POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+
+      # Must match the Host on Dokploy's Domains tab exactly. Phoenix builds
+      # every absolute URL — booking links, email links, OAuth redirect URIs —
+      # from this rather than from the request.
+      PHX_HOST: ${PHX_HOST:?PHX_HOST is required}
+
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?DATA_ENCRYPTION_KEY is required}
+
+      # Not derived from PHX_HOST on purpose: the From address has to be on a
+      # domain your relay is authorised to send for, which is often not the
+      # domain the booking page runs on. Deriving it would quietly break SPF.
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:?EMAIL_FROM_ADDRESS is required}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Tymeslot}
+
+      # The mailer defaults to SMTP and refuses to boot without a host.
+      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST is required}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      # Blank is read as absent, so an unauthenticated relay needs no change.
+      # Set both together or neither; one alone raises at boot.
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+
+      # Calendar OAuth, only for Google and Microsoft 365. Exchange, CalDAV,
+      # Nextcloud, Radicale, Baikal, Zimbra, mailbox.org, Apple and ICS feeds
+      # are configured entirely in the app and need nothing here.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_STATE_SECRET: ${GOOGLE_STATE_SECRET:-}
+      OUTLOOK_CLIENT_ID: ${OUTLOOK_CLIENT_ID:-}
+      OUTLOOK_CLIENT_SECRET: ${OUTLOOK_CLIENT_SECRET:-}
+      OUTLOOK_STATE_SECRET: ${OUTLOOK_STATE_SECRET:-}
+
+    # Migrations run on boot, so the database must be accepting connections
+    # first. Without this the first deploy races and the container restarts.
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    volumes:
+      - tymeslot_data:/app/data
+
+    # dokploy-network is what Traefik routes over; internal is this project's
+    # private link to postgres.
+    networks:
+      - dokploy-network
+      - internal
+
+  postgres:
+    # Matches the version upstream's own docker-compose.with-postgres.yml uses.
+    image: postgres:17-alpine
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: tymeslot
+      POSTGRES_USER: tymeslot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+
+    volumes:
+      - tymeslot_pgdata:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U tymeslot -d tymeslot"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+    # Deliberately not on dokploy-network: the database is reachable only from
+    # this project, never from Traefik or from other Dokploy applications.
+    networks:
+      - internal
+
+# Left unnamed so Dokploy namespaces them per project. Upstream's compose files
+# pin `name: tymeslot_data` and `name: tymeslot_pg`; colliding with those would
+# hand postgres:17-alpine a cluster created by a different packaging, which it
+# refuses to open.
+volumes:
+  tymeslot_data:
+  tymeslot_pgdata:
+
+networks:
+  dokploy-network:
+    external: true
+  internal:
