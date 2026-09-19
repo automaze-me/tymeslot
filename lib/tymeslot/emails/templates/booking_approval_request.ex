@@ -17,6 +17,8 @@ defmodule Tymeslot.Emails.Templates.BookingApprovalRequest do
 
   import Swoosh.Email
 
+  alias Tymeslot.Availability.Travel
+
   alias Tymeslot.Emails.Shared.{
     Buttons,
     Formatting,
@@ -133,13 +135,25 @@ defmodule Tymeslot.Emails.Templates.BookingApprovalRequest do
     )
   end
 
-  # The host reads the time in their own zone, resolved from their profile
-  # (falling back to the platform default for an unregistered organiser) —
-  # the same resolution `CalendarEmails.resolve_owner_timezone/1` uses for
-  # every other host-addressed email. The invitee's own zone is rendered
-  # separately in `attendee_time_sentence/3`, so both are visible without
-  # arithmetic.
+  # The host reads the time in the zone in effect on the meeting's own date —
+  # the covering trip's zone if one applies on that date, else the profile's
+  # own zone (falling back to the platform default for an unregistered
+  # organiser) — the same resolution `Tymeslot.Emails.AppointmentBuilder.owner_timezone/1`
+  # and `CalendarEmails.resolve_owner_timezone/1` use for every other
+  # host-addressed email. See the tradeoff/edge-case comment on the former for
+  # why the date is read in the host's home zone rather than UTC. The
+  # invitee's own zone is rendered separately in `attendee_time_sentence/3`,
+  # so both are visible without arithmetic.
   defp host_timezone(%Meeting{organizer_user_id: nil}), do: Profiles.get_default_timezone()
+
+  defp host_timezone(%Meeting{organizer_user_id: user_id, start_time: %DateTime{} = start_time}) do
+    home_timezone = Profiles.get_user_timezone(user_id)
+
+    meeting_date =
+      start_time |> TimezoneHelper.convert_to_timezone(home_timezone) |> DateTime.to_date()
+
+    Travel.timezone_for_user_on(user_id, meeting_date)
+  end
 
   defp host_timezone(%Meeting{organizer_user_id: user_id}),
     do: Profiles.get_user_timezone(user_id)
