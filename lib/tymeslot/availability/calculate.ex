@@ -426,8 +426,7 @@ defmodule Tymeslot.Availability.Calculate do
   """
   @spec prefetch_travel_periods(availability_config(), integer() | nil, Date.t(), Date.t()) ::
           availability_config()
-  def prefetch_travel_periods(config, nil, _start_date, _end_date),
-    do: Map.put_new(config, :travel_periods, [])
+  def prefetch_travel_periods(config, nil, _start_date, _end_date), do: config
 
   def prefetch_travel_periods(config, profile_id, start_date, end_date) do
     Map.put_new_lazy(config, :travel_periods, fn ->

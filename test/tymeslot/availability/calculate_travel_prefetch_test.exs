@@ -28,10 +28,10 @@ defmodule Tymeslot.Availability.CalculateTravelPrefetchTest do
       assert [_day] = loaded.days
     end
 
-    test "puts an empty list when there is no profile" do
+    test "passes the config through untouched when there is no profile" do
       config = Calculate.prefetch_travel_periods(%{}, nil, ~D[2027-03-01], ~D[2027-03-31])
 
-      assert config.travel_periods == []
+      refute Map.has_key?(config, :travel_periods)
     end
 
     test "leaves an already-populated key alone" do

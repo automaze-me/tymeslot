@@ -1740,10 +1740,10 @@ defmodule Tymeslot.Availability.CalculateTravelPrefetchTest do
       assert [_day] = loaded.days
     end
 
-    test "puts an empty list when there is no profile" do
+    test "passes the config through untouched when there is no profile" do
       config = Calculate.prefetch_travel_periods(%{}, nil, ~D[2027-03-01], ~D[2027-03-31])
 
-      assert config.travel_periods == []
+      refute Map.has_key?(config, :travel_periods)
     end
 
     test "leaves an already-populated key alone" do
@@ -1812,8 +1812,7 @@ In `lib/tymeslot/availability/calculate.ex`, directly after `prefetch_schedule_d
   """
   @spec prefetch_travel_periods(availability_config(), integer() | nil, Date.t(), Date.t()) ::
           availability_config()
-  def prefetch_travel_periods(config, nil, _start_date, _end_date),
-    do: Map.put_new(config, :travel_periods, [])
+  def prefetch_travel_periods(config, nil, _start_date, _end_date), do: config
 
   def prefetch_travel_periods(config, profile_id, start_date, end_date) do
     Map.put_new_lazy(config, :travel_periods, fn ->
