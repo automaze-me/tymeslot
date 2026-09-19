@@ -74,6 +74,7 @@ msgstr "Přestávka byla smazána."
 #: lib/tymeslot_web/components/dashboard/availability/clear_day_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_break_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_schedule_modal.ex
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/schedule_form_modal.ex
 #: lib/tymeslot_web/live/dashboard/availability/day_card_component.ex
 #, elixir-autogen, elixir-format
@@ -169,6 +170,7 @@ msgstr "Začátek"
 
 #: lib/tymeslot_web/components/dashboard/availability/delete_break_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_schedule_modal.ex
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #, elixir-autogen, elixir-format
 msgid "This action cannot be undone."
 msgstr "Tuto akci nelze vrátit zpět."
@@ -335,6 +337,7 @@ msgid "Advance booking window updated to %{days} days"
 msgstr "Období pro rezervace změněno na %{days} dní."
 
 #: lib/tymeslot_web/components/dashboard/availability/delete_schedule_modal.ex
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #, elixir-autogen, elixir-format
 msgid "Are you sure you want to delete %{name}?"
 msgstr "Opravdu chcete smazat %{name}?"
@@ -365,6 +368,7 @@ msgid "Default schedule updated"
 msgstr "Výchozí rozvrh aktualizován"
 
 #: lib/tymeslot_web/live/dashboard/availability/schedule_switcher.ex
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr "Smazat"
@@ -623,3 +627,38 @@ msgstr "3 hodiny"
 #, elixir-autogen, elixir-format
 msgid "6 hours"
 msgstr "6 hodin"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Add a trip"
+msgstr "Přidat cestu"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Dates when you are in another timezone, with the hours you are bookable there."
+msgstr "Data, kdy jste v jiném časovém pásmu, s hodinami, kdy jste tam k dispozici pro rezervace."
+
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
+#, elixir-autogen, elixir-format
+msgid "Delete Trip"
+msgstr "Smazat cestu"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Edit"
+msgstr "Upravit"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "No trips yet."
+msgstr "Zatím žádné cesty."
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Travel"
+msgstr "Cesty"
+
+#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Trip deleted"
+msgstr "Cesta smazána"

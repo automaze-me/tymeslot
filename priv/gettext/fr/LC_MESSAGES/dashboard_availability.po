@@ -74,6 +74,7 @@ msgstr "Pause supprimée"
 #: lib/tymeslot_web/components/dashboard/availability/clear_day_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_break_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_schedule_modal.ex
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/schedule_form_modal.ex
 #: lib/tymeslot_web/live/dashboard/availability/day_card_component.ex
 #, elixir-autogen, elixir-format
@@ -169,6 +170,7 @@ msgstr "Heure de début"
 
 #: lib/tymeslot_web/components/dashboard/availability/delete_break_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_schedule_modal.ex
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #, elixir-autogen, elixir-format
 msgid "This action cannot be undone."
 msgstr "Cette action est irréversible."
@@ -335,6 +337,7 @@ msgid "Advance booking window updated to %{days} days"
 msgstr "Délai de réservation mis à jour à %{days} jours"
 
 #: lib/tymeslot_web/components/dashboard/availability/delete_schedule_modal.ex
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #, elixir-autogen, elixir-format
 msgid "Are you sure you want to delete %{name}?"
 msgstr "Voulez-vous vraiment supprimer %{name} ?"
@@ -365,6 +368,7 @@ msgid "Default schedule updated"
 msgstr "Planning par défaut mis à jour"
 
 #: lib/tymeslot_web/live/dashboard/availability/schedule_switcher.ex
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr "Supprimer"
@@ -623,3 +627,38 @@ msgstr "3 heures"
 #, elixir-autogen, elixir-format
 msgid "6 hours"
 msgstr "6 heures"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Add a trip"
+msgstr "Ajouter un voyage"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Dates when you are in another timezone, with the hours you are bookable there."
+msgstr "Dates pendant lesquelles vous êtes dans un autre fuseau horaire, avec les horaires où vous y êtes disponible à la réservation."
+
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
+#, elixir-autogen, elixir-format
+msgid "Delete Trip"
+msgstr "Supprimer le voyage"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Edit"
+msgstr "Modifier"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "No trips yet."
+msgstr "Aucun voyage pour le moment."
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Travel"
+msgstr "Voyages"
+
+#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Trip deleted"
+msgstr "Voyage supprimé"

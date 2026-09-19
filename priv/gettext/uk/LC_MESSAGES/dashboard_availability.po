@@ -74,6 +74,7 @@ msgstr "Перерву видалено"
 #: lib/tymeslot_web/components/dashboard/availability/clear_day_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_break_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_schedule_modal.ex
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/schedule_form_modal.ex
 #: lib/tymeslot_web/live/dashboard/availability/day_card_component.ex
 #, elixir-autogen, elixir-format
@@ -169,6 +170,7 @@ msgstr "Час початку"
 
 #: lib/tymeslot_web/components/dashboard/availability/delete_break_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_schedule_modal.ex
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #, elixir-autogen, elixir-format
 msgid "This action cannot be undone."
 msgstr "Цю дію неможливо скасувати."
@@ -335,6 +337,7 @@ msgid "Advance booking window updated to %{days} days"
 msgstr "Вікно завчасного бронювання оновлено: %{days} дн."
 
 #: lib/tymeslot_web/components/dashboard/availability/delete_schedule_modal.ex
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #, elixir-autogen, elixir-format
 msgid "Are you sure you want to delete %{name}?"
 msgstr "Ви впевнені, що хочете видалити %{name}?"
@@ -365,6 +368,7 @@ msgid "Default schedule updated"
 msgstr "Типовий розклад оновлено"
 
 #: lib/tymeslot_web/live/dashboard/availability/schedule_switcher.ex
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr "Видалити"
@@ -622,3 +626,38 @@ msgstr "3 години"
 #, elixir-autogen, elixir-format
 msgid "6 hours"
 msgstr "6 годин"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Add a trip"
+msgstr "Додати поїздку"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Dates when you are in another timezone, with the hours you are bookable there."
+msgstr "Дати, коли ви перебуваєте в іншому часовому поясі, із годинами, коли вас можна забронювати там."
+
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
+#, elixir-autogen, elixir-format
+msgid "Delete Trip"
+msgstr "Видалити поїздку"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Edit"
+msgstr "Редагувати"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "No trips yet."
+msgstr "Поки немає поїздок."
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Travel"
+msgstr "Поїздки"
+
+#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Trip deleted"
+msgstr "Поїздку видалено"
