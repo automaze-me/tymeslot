@@ -8,6 +8,7 @@ defmodule TymeslotWeb.Live.Scheduling.AvailabilityHelpers do
 
   alias Phoenix.Component
   alias Tymeslot.Availability.{Calculate, Schedules, TimeSlots}
+  alias Tymeslot.Availability.Travel
   alias Tymeslot.Bookings.Policy
   alias Tymeslot.Demo
   alias Tymeslot.Infrastructure.AvailabilityCache
@@ -47,6 +48,37 @@ defmodule TymeslotWeb.Live.Scheduling.AvailabilityHelpers do
       duration_minutes: duration_minutes
     }
   end
+
+  @doc """
+  Loads the travel periods overlapping an inclusive date window into `config`.
+
+  The display path's counterpart to the `:profile_id` that
+  `Tymeslot.Bookings.Policy.scheduling_config/2` carries. Both end up going
+  through `Tymeslot.Availability.OwnerFrame`, which is what stops the offered
+  slots and the booking-time re-check from disagreeing about which trips apply
+  — the same reason `Policy.slot_interval_minutes/1` is a single shared
+  resolver.
+
+  Pass a window a day wider at each end than the dates being resolved: the slot
+  engine reads the day before and after each target date to catch windows that
+  straddle midnight, and a prefetched list wins over `OwnerFrame`'s per-date
+  query, so a trip starting the day after the window would otherwise resolve as
+  no trip at all.
+
+  A nil profile yields no trips rather than raising, so the demo provider and
+  any caller without a resolved organiser behave as they did before.
+  """
+  @spec put_travel_periods(map(), map() | nil, Date.t(), Date.t()) :: map()
+  def put_travel_periods(config, nil, _first_date, _last_date),
+    do: Map.put(config, :travel_periods, [])
+
+  def put_travel_periods(config, %{id: profile_id}, first_date, last_date)
+      when is_integer(profile_id) do
+    Map.put(config, :travel_periods, Travel.for_window(profile_id, first_date, last_date))
+  end
+
+  def put_travel_periods(config, _organizer_profile, _first_date, _last_date),
+    do: Map.put(config, :travel_periods, [])
 
   @doc """
   Gets available slots for a specific date.
@@ -98,12 +130,13 @@ defmodule TymeslotWeb.Live.Scheduling.AvailabilityHelpers do
             schedule = Schedules.resolve_for(meeting_type, organizer_profile)
 
             config =
-              schedule_config(
-                schedule,
+              schedule
+              |> schedule_config(
                 meeting_type,
                 build_limit_checker(organizer_user_id, organizer_profile, context, date, date),
                 duration_minutes
               )
+              |> put_travel_periods(organizer_profile, Date.add(date, -1), Date.add(date, 1))
 
             Calculate.available_slots(
               date,
@@ -192,11 +225,16 @@ defmodule TymeslotWeb.Live.Scheduling.AvailabilityHelpers do
               schedule = Schedules.resolve_for(meeting_type, organizer_profile)
 
               config =
-                schedule_config(
-                  schedule,
+                schedule
+                |> schedule_config(
                   meeting_type,
                   build_limit_checker(user_id, organizer_profile, context, start_date, end_date),
                   duration_minutes || 30
+                )
+                |> put_travel_periods(
+                  organizer_profile,
+                  Date.add(start_date, -1),
+                  Date.add(end_date, 1)
                 )
 
               Calculate.range_availability(

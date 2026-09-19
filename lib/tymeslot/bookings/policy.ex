@@ -41,12 +41,14 @@ defmodule Tymeslot.Bookings.Policy do
           required(:min_advance_hours) => integer(),
           required(:max_advance_booking_days) => integer(),
           required(:owner_timezone) => String.t(),
+          required(:profile_id) => integer() | nil,
           required(:slot_interval_minutes) => pos_integer() | nil
         }
   def scheduling_config(nil, _meeting_type) do
     nil
     |> policy_values()
     |> Map.put(:owner_timezone, Profiles.get_default_timezone())
+    |> Map.put(:profile_id, nil)
     |> Map.put(:slot_interval_minutes, nil)
   end
 
@@ -57,6 +59,10 @@ defmodule Tymeslot.Bookings.Policy do
     |> resolve_schedule(meeting_type)
     |> policy_values()
     |> Map.put(:owner_timezone, settings.timezone)
+    # No date is in scope here, so trips are not prefetched: `OwnerFrame` reads
+    # them per date from this id, the same prefetch-or-query fallback
+    # `BusinessHours` already uses for overrides and weekly days.
+    |> Map.put(:profile_id, settings.profile_id)
     |> Map.put(:slot_interval_minutes, slot_interval_minutes(meeting_type))
   end
 

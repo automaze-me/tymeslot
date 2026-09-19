@@ -33,6 +33,7 @@ defmodule Tymeslot.Profiles do
   @type result(t) :: {:ok, t} | {:error, error_reason}
   @type uploaded_entry :: map()
   @type profile_settings :: %{
+          profile_id: integer() | nil,
           timezone: timezone,
           max_bookings_per_day: pos_integer() | nil,
           max_bookings_per_week: pos_integer() | nil,
@@ -276,6 +277,7 @@ defmodule Tymeslot.Profiles do
     case ProfileQueries.get_by_user_id(user_id) do
       {:error, :not_found} ->
         %{
+          profile_id: nil,
           timezone: get_default_timezone(),
           max_bookings_per_day: nil,
           max_bookings_per_week: nil,
@@ -284,6 +286,9 @@ defmodule Tymeslot.Profiles do
 
       {:ok, profile} ->
         %{
+          # Carried so callers that hold only a user id can resolve travel
+          # periods, which hang off the profile.
+          profile_id: profile.id,
           # A profile's timezone column is nullable, so fall back here as
           # `get_user_timezone/1` does — the declared `timezone` type is
           # non-nil, and every caller reads a usable zone rather than each
