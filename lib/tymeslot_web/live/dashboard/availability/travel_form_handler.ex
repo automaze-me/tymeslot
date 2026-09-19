@@ -3,13 +3,16 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
   Event handling for the travel period editor embedded in
   `TymeslotWeb.Dashboard.ScheduleSettingsComponent`.
 
-  Kept out of that module, which already sat close to this fork's informal
-  size ceiling before this feature existed: "how a submitted trip form
-  becomes `Travel` calls" is a cohesive unit on its own, the same reason
-  `TymeslotWeb.Dashboard.Availability.ListComponent.BreakHelpers` exists
-  beside the weekly schedule editor. The functions here take and return the
-  host component's socket, exactly as a `handle_event/3` clause would; only
-  the dispatch itself lives in the component.
+  Unlike `TymeslotWeb.Dashboard.Availability.ListComponent.BreakHelpers`
+  (pure, stateless functions called *from* `handle_event/3` clauses that
+  stay in `ListComponent`), this module owns the `handle_event/3` clauses
+  themselves: `handle_event/3` here takes and returns the host component's
+  socket exactly as a clause defined directly in
+  `ScheduleSettingsComponent` would, and that component's own `handle_event`
+  only dispatches to it by event name — see `events/0`. It exists as its
+  own module because "how a submitted trip form becomes `Travel` calls" is
+  a large, cohesive unit that `ScheduleSettingsComponent` had no room left
+  to hold inline.
   """
   import Phoenix.Component, only: [assign: 2, assign: 3]
 
@@ -47,6 +50,7 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
     socket
     |> assign(:show_travel_form, true)
     |> assign(:travel_form_period, period)
+    |> assign(:travel_form_submitted, nil)
     |> assign(:travel_form_timezone, default_timezone(period, socket.assigns.profile))
     |> assign(:travel_form_timezone_dropdown_open, false)
     |> assign(:travel_form_timezone_search, "")
@@ -56,7 +60,12 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
 
   def handle_event("hide_travel_form", _params, socket) do
     socket
-    |> assign(show_travel_form: false, travel_form_period: nil, travel_form_errors: %{})
+    |> assign(
+      show_travel_form: false,
+      travel_form_period: nil,
+      travel_form_submitted: nil,
+      travel_form_errors: %{}
+    )
     |> noreply()
   end
 
@@ -117,10 +126,13 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
 
     case result do
       {:ok, period} ->
-        finish_saving(socket, profile, period, params["days"] || %{})
+        finish_saving(socket, profile, period, params)
 
       {:error, changeset} ->
-        noreply(assign(socket, :travel_form_errors, travel_errors(changeset)))
+        socket
+        |> assign(:travel_form_errors, travel_errors(changeset))
+        |> assign(:travel_form_submitted, params)
+        |> noreply()
     end
   end
 
@@ -129,14 +141,22 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
   # stays open (carrying the now-persisted trip, so a retry edits rather than
   # duplicates) and the failure is surfaced rather than swallowed — a checked
   # day whose hours silently failed to save is exactly the trap that leaves a
-  # host unbookable without a word.
-  defp finish_saving(socket, profile, period, days) do
-    case save_days(profile, period, days) do
+  # host unbookable without a word. Either way, `travel_form_submitted` keeps
+  # whatever the host just typed on screen: `TravelForm` renders from it in
+  # preference to the trip's saved fields whenever it is set, so a rejected
+  # submission (an overlap, a bad day) never comes back blank.
+  defp finish_saving(socket, profile, period, params) do
+    case save_days(profile, period, params["days"] || %{}) do
       :ok ->
         Flash.info(dgettext("dashboard_availability", "Trip saved"))
 
         socket
-        |> assign(show_travel_form: false, travel_form_period: nil, travel_form_errors: %{})
+        |> assign(
+          show_travel_form: false,
+          travel_form_period: nil,
+          travel_form_submitted: nil,
+          travel_form_errors: %{}
+        )
         |> reload_travel_periods()
         |> noreply()
 
@@ -145,6 +165,7 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
 
         socket
         |> assign(:travel_form_period, period)
+        |> assign(:travel_form_submitted, params)
         |> reload_travel_periods()
         |> noreply()
     end

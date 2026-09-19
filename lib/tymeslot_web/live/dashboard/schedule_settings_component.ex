@@ -11,8 +11,6 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   use TymeslotWeb, :live_component
   use Gettext, backend: TymeslotWeb.Gettext
 
-  alias Ecto.Changeset
-
   alias Tymeslot.Availability.{
     AvailabilityActions,
     AvailabilityScheduleSchema,
@@ -23,19 +21,21 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
 
   alias Tymeslot.MeetingTypes.InputValidation, as: MeetingSettingsInputValidation
   alias Tymeslot.Timezones
-  alias Tymeslot.Utils.ChangesetUtils
   alias Tymeslot.Validation.Constraints
 
-  alias TymeslotWeb.Components.Dashboard.Availability.{
-    DeleteScheduleModal,
-    DeleteTravelPeriodModal,
-    ScheduleFormModal
-  }
-
+  alias TymeslotWeb.Components.Dashboard.Availability.ScheduleFormModal
   alias TymeslotWeb.CustomInputModeHelper
 
   alias TymeslotWeb.Dashboard.Availability.{ListComponent, PolicyCard, ScheduleSwitcher}
-  alias TymeslotWeb.Live.Dashboard.Availability.{TravelForm, TravelFormHandler, TravelSection}
+
+  alias TymeslotWeb.Live.Dashboard.Availability.{
+    DeleteModalHandler,
+    DeleteModals,
+    ScheduleFailureMessage,
+    TravelForm,
+    TravelFormHandler,
+    TravelSection
+  }
 
   # The policy settings differ only in which schedule field they write, so the
   # handlers below route through one pair of helpers driven by these tables.
@@ -57,6 +57,10 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   # Every event the travel form's markup emits, in one place so the dispatch
   # guard below and `TravelFormHandler` cannot fall out of step.
   @travel_form_events TravelFormHandler.events()
+
+  # Same idea for the two delete-confirmation modals' events; see
+  # `DeleteModalHandler`.
+  @delete_modal_events DeleteModalHandler.events()
 
   # Value seeded into the custom input when a field currently sitting on a
   # preset is switched into custom mode. The preset lists themselves are
@@ -83,6 +87,7 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
        schedule_menu_open: false,
        show_travel_form: false,
        travel_form_period: nil,
+       travel_form_submitted: nil,
        travel_form_timezone: nil,
        travel_form_timezone_dropdown_open: false,
        travel_form_timezone_search: "",
@@ -168,7 +173,7 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
           {:noreply, select_and_reload(socket, copy.id)}
 
         {:error, reason} ->
-          Flash.error(failure_message(reason))
+          Flash.error(ScheduleFailureMessage.for_reason(reason))
           {:noreply, socket}
       end
     end)
@@ -182,60 +187,18 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
           {:noreply, select_and_reload(socket, updated.id)}
 
         {:error, reason} ->
-          Flash.error(failure_message(reason))
+          Flash.error(ScheduleFailureMessage.for_reason(reason))
           {:noreply, socket}
       end
     end)
   end
 
-  def handle_event("show_delete_schedule_modal", _params, socket) do
-    with_selected(socket, fn schedule ->
-      data = %{
-        id: schedule.id,
-        name: schedule.name,
-        meeting_type_names: Schedules.meeting_type_names(schedule.id)
-      }
-
-      {:noreply,
-       socket
-       |> close_menu()
-       |> ModalHook.show_modal(:delete_schedule, data)}
-    end)
-  end
-
-  def handle_event("hide_delete_schedule_modal", _params, socket) do
-    {:noreply, ModalHook.hide_modal(socket, :delete_schedule)}
-  end
-
-  def handle_event("confirm_delete_schedule", _params, socket) do
-    ModalHook.with_modal_data(socket, :delete_schedule, fn data ->
-      case Enum.find(socket.assigns.schedules, &(&1.id == data.id)) do
-        nil -> {:noreply, ModalHook.hide_modal(socket, :delete_schedule)}
-        schedule -> delete_schedule(socket, schedule)
-      end
-    end)
-  end
-
-  # Travel periods
-
-  def handle_event("show_delete_travel_modal", %{"id" => id}, socket) do
-    with_travel_period(socket, id, fn period ->
-      {:noreply,
-       ModalHook.show_modal(socket, :delete_travel_period, %{id: period.id, label: period.label})}
-    end)
-  end
-
-  def handle_event("hide_delete_travel_modal", _params, socket) do
-    {:noreply, ModalHook.hide_modal(socket, :delete_travel_period)}
-  end
-
-  def handle_event("confirm_delete_travel_period", _params, socket) do
-    ModalHook.with_modal_data(socket, :delete_travel_period, fn data ->
-      case Enum.find(socket.assigns.travel_periods, &(&1.id == data.id)) do
-        nil -> {:noreply, ModalHook.hide_modal(socket, :delete_travel_period)}
-        period -> delete_travel_period(socket, period)
-      end
-    end)
+  # The delete-confirmation modals' own state handling — show/hide/confirm
+  # for both a schedule and a travel period — lives in `DeleteModalHandler`,
+  # alongside `DeleteModals`' markup, rather than here: see that module's
+  # `@moduledoc` for why.
+  def handle_event(event, params, socket) when event in @delete_modal_events do
+    DeleteModalHandler.handle_event(event, params, socket)
   end
 
   # The travel form's own state handling — show/hide, the zone dropdown, the
@@ -264,8 +227,11 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
 
   # State Management Functions
 
+  # Public (not merely `defp`) so `DeleteModalHandler` can put the page back
+  # into the same state a schedule deletion always leaves it in, the same
+  # state a tab switch or a rename does, rather than reimplementing it.
   @spec load_schedules(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
-  defp load_schedules(socket) do
+  def load_schedules(socket) do
     schedules = Schedules.list_for_profile(socket.assigns.profile.id)
     selected = pick_selected(schedules, socket.assigns[:selected_schedule_id])
 
@@ -297,11 +263,13 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
     end
   end
 
-  defp patch_to_selected(%{assigns: %{selected_schedule: nil}} = socket) do
+  # Public alongside `load_schedules/1`, for the same reason.
+  @spec patch_to_selected(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
+  def patch_to_selected(%{assigns: %{selected_schedule: nil}} = socket) do
     push_patch(socket, to: ~p"/dashboard/availability")
   end
 
-  defp patch_to_selected(socket) do
+  def patch_to_selected(socket) do
     query = [{@schedule_param, socket.assigns.selected_schedule.id}]
     push_patch(socket, to: ~p"/dashboard/availability?#{query}")
   end
@@ -340,22 +308,6 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
     end
   end
 
-  # Finding the trip in the already-loaded list rather than fetching by id is
-  # what scopes every action to this profile: an id belonging to someone else
-  # is simply not in the list.
-  defp with_travel_period(socket, id, fun) do
-    case parse_id(id) do
-      nil ->
-        {:noreply, socket}
-
-      period_id ->
-        case Enum.find(socket.assigns.travel_periods, &(&1.id == period_id)) do
-          nil -> {:noreply, socket}
-          period -> fun.(period)
-        end
-    end
-  end
-
   defp save_schedule(socket, :create, name) do
     case Schedules.create(socket.assigns.profile.id, %{name: name}) do
       {:ok, schedule} ->
@@ -363,7 +315,7 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
         {:noreply, select_and_reload(socket, schedule.id)}
 
       {:error, reason} ->
-        Flash.error(failure_message(reason))
+        Flash.error(ScheduleFailureMessage.for_reason(reason))
         {:noreply, socket}
     end
   end
@@ -376,54 +328,10 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
           {:noreply, select_and_reload(socket, renamed.id)}
 
         {:error, reason} ->
-          Flash.error(failure_message(reason))
+          Flash.error(ScheduleFailureMessage.for_reason(reason))
           {:noreply, socket}
       end
     end)
-  end
-
-  defp delete_schedule(socket, schedule) do
-    case Schedules.delete(schedule) do
-      {:ok, _schedule} ->
-        Flash.info(dgettext("dashboard_availability", "Schedule deleted"))
-
-        {:noreply,
-         socket
-         |> ModalHook.hide_modal(:delete_schedule)
-         |> assign(:selected_schedule_id, nil)
-         |> load_schedules()
-         |> patch_to_selected()}
-
-      {:error, :cannot_delete_default} ->
-        Flash.error(
-          dgettext(
-            "dashboard_availability",
-            "Your default schedule cannot be deleted. Make another schedule the default first."
-          )
-        )
-
-        {:noreply, ModalHook.hide_modal(socket, :delete_schedule)}
-
-      {:error, reason} ->
-        Flash.error(failure_message(reason))
-        {:noreply, socket}
-    end
-  end
-
-  defp delete_travel_period(socket, period) do
-    case Travel.delete_period(socket.assigns.profile, period) do
-      {:ok, _deleted} ->
-        Flash.info(dgettext("dashboard_availability", "Trip deleted"))
-
-        {:noreply,
-         socket
-         |> ModalHook.hide_modal(:delete_travel_period)
-         |> load_travel_periods()}
-
-      {:error, reason} ->
-        Flash.error(failure_message(reason))
-        {:noreply, ModalHook.hide_modal(socket, :delete_travel_period)}
-    end
   end
 
   # A copy carries the hours, breaks and rules but not the date overrides, which
@@ -488,7 +396,7 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
       {:noreply, socket}
     else
       {:error, reason} ->
-        Flash.error(failure_message(reason))
+        Flash.error(ScheduleFailureMessage.for_reason(reason))
         {:noreply, socket}
     end
   end
@@ -515,7 +423,7 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
          |> assign_selected(updated)}
 
       {:error, reason} ->
-        Flash.error(failure_message(reason))
+        Flash.error(ScheduleFailureMessage.for_reason(reason))
         {:noreply, socket}
     end
   end
@@ -575,20 +483,6 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   defp custom_policy_flash(:min_advance_hours),
     do: dgettext("dashboard_availability", "Minimum notice set to custom value")
 
-  defp failure_message(%Changeset{} = changeset), do: ChangesetUtils.get_first_error(changeset)
-  defp failure_message(message) when is_binary(message), do: message
-
-  defp failure_message(:schedule_limit_reached),
-    do:
-      dgettext(
-        "dashboard_availability",
-        "You have reached the limit of %{count} schedules. Delete one to add another.",
-        count: Schedules.max_schedules()
-      )
-
-  defp failure_message(_reason),
-    do: dgettext("dashboard_availability", "Something went wrong. Please try again.")
-
   @impl Phoenix.LiveComponent
   @spec render(map()) :: Phoenix.LiveView.Rendered.t()
   def render(assigns) do
@@ -638,26 +532,19 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
         myself={@myself}
       />
 
-      <DeleteScheduleModal.delete_schedule_modal
-        id="delete-schedule-modal"
-        show={@show_delete_schedule_modal}
-        schedule_data={@delete_schedule_modal_data}
-        on_cancel={JS.push("hide_delete_schedule_modal", target: @myself)}
-        on_confirm={JS.push("confirm_delete_schedule", target: @myself)}
-      />
-
-      <DeleteTravelPeriodModal.delete_travel_period_modal
-        id="delete-travel-period-modal"
-        show={@show_delete_travel_period_modal}
-        period_data={@delete_travel_period_modal_data}
-        on_cancel={JS.push("hide_delete_travel_modal", target: @myself)}
-        on_confirm={JS.push("confirm_delete_travel_period", target: @myself)}
+      <DeleteModals.delete_modals
+        show_delete_schedule_modal={@show_delete_schedule_modal}
+        delete_schedule_modal_data={@delete_schedule_modal_data}
+        show_delete_travel_period_modal={@show_delete_travel_period_modal}
+        delete_travel_period_modal_data={@delete_travel_period_modal_data}
+        myself={@myself}
       />
 
       <TravelForm.travel_form_modal
         id="travel-form-modal"
         show={@show_travel_form}
         period={@travel_form_period}
+        submitted={@travel_form_submitted}
         timezone_options={Timezones.all_options()}
         timezone={@travel_form_timezone}
         timezone_dropdown_open={@travel_form_timezone_dropdown_open}

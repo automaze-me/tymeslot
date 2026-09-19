@@ -33,6 +33,16 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
   attr :id, :string, required: true
   attr :show, :boolean, required: true
   attr :period, :map, default: nil
+
+  attr :submitted, :map,
+    default: nil,
+    doc: """
+    The raw `phx-submit` params from the host's last, rejected attempt (an
+    overlap, a bad day), if any. When set, every field below renders from
+    this rather than from `:period`, so a validation error never comes back
+    with what the host just typed erased. Cleared once a save succeeds.
+    """
+
   attr :timezone_options, :list, required: true
   attr :timezone, :string, default: nil
   attr :timezone_dropdown_open, :boolean, default: false
@@ -47,6 +57,7 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
       assigns
       |> assign(:weekdays, @weekdays)
       |> assign(:zone_profile, %{timezone: assigns.timezone})
+      |> assign(:values, form_values(assigns.submitted, assigns.period))
       |> assign(
         :timezone_error,
         List.first(FormValidationHelpers.field_errors(assigns.form_errors, :timezone))
@@ -64,7 +75,7 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
           name="label"
           type="text"
           label={dgettext("dashboard_availability", "Label")}
-          value={@period && @period.label}
+          value={@values.label}
           maxlength={TravelPeriodSchema.label_max_length()}
           required
           errors={FormValidationHelpers.field_errors(@form_errors, :label)}
@@ -76,7 +87,7 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
             name="start_date"
             type="date"
             label={dgettext("dashboard_availability", "Start date")}
-            value={@period && Date.to_iso8601(@period.start_date)}
+            value={@values.start_date}
             required
             errors={FormValidationHelpers.field_errors(@form_errors, :start_date)}
           />
@@ -86,7 +97,7 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
             name="end_date"
             type="date"
             label={dgettext("dashboard_availability", "End date")}
-            value={@period && Date.to_iso8601(@period.end_date)}
+            value={@values.end_date}
             required
             errors={FormValidationHelpers.field_errors(@form_errors, :end_date)}
           />
@@ -120,7 +131,7 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
                 type="checkbox"
                 name={"days[#{day_of_week}][is_available]"}
                 value="true"
-                checked={day_available?(@period, day_of_week)}
+                checked={day_checked?(@values, day_of_week)}
                 class="checkbox w-5 h-5 rounded border-tymeslot-300 text-turquoise-600 focus:ring-turquoise-500"
               />
               {AvailabilityActions.day_name(day_of_week)}
@@ -129,14 +140,14 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
             <input
               type="time"
               name={"days[#{day_of_week}][start_time]"}
-              value={day_time(@period, day_of_week, :start_time)}
+              value={day_field(@values, day_of_week, :start_time)}
               class="input"
             />
             <span class="text-tymeslot-400">–</span>
             <input
               type="time"
               name={"days[#{day_of_week}][end_time]"}
-              value={day_time(@period, day_of_week, :end_time)}
+              value={day_field(@values, day_of_week, :end_time)}
               class="input"
             />
           </div>
@@ -158,27 +169,68 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
   defp header_title(nil), do: dgettext("dashboard_availability", "New trip")
   defp header_title(_period), do: dgettext("dashboard_availability", "Edit trip")
 
-  defp day_available?(nil, _day_of_week), do: false
+  # `:submitted` wins whenever present: it is exactly what the host typed on
+  # their last, rejected attempt, already in the string shape every field
+  # below needs. Falling back to `:period` covers both a fresh edit (real
+  # dates and times, formatted once here) and a fresh add (nothing to show).
+  defp form_values(nil, nil) do
+    %{label: nil, start_date: nil, end_date: nil, days: %{}}
+  end
 
-  defp day_available?(period, day_of_week) do
-    case find_day(period, day_of_week) do
+  defp form_values(nil, period) do
+    %{
+      label: period.label,
+      start_date: Date.to_iso8601(period.start_date),
+      end_date: Date.to_iso8601(period.end_date),
+      days: days_from_period(period)
+    }
+  end
+
+  defp form_values(submitted, _period) do
+    %{
+      label: submitted["label"],
+      start_date: submitted["start_date"],
+      end_date: submitted["end_date"],
+      days: days_from_submitted(submitted["days"] || %{})
+    }
+  end
+
+  defp days_from_period(period) do
+    days = if is_list(period.days), do: period.days, else: []
+
+    Map.new(days, fn day ->
+      {day.day_of_week,
+       %{
+         is_available: day.is_available,
+         start_time: format_time(day.start_time),
+         end_time: format_time(day.end_time)
+       }}
+    end)
+  end
+
+  defp days_from_submitted(days_params) do
+    Map.new(days_params, fn {day_of_week, attrs} ->
+      {String.to_integer(day_of_week),
+       %{
+         is_available: attrs["is_available"] in ["true", true],
+         start_time: attrs["start_time"],
+         end_time: attrs["end_time"]
+       }}
+    end)
+  end
+
+  defp day_checked?(values, day_of_week) do
+    case Map.get(values.days, day_of_week) do
       nil -> false
       day -> day.is_available
     end
   end
 
-  defp day_time(nil, _day_of_week, _field), do: nil
-
-  defp day_time(period, day_of_week, field) do
-    case find_day(period, day_of_week) do
+  defp day_field(values, day_of_week, field) do
+    case Map.get(values.days, day_of_week) do
       nil -> nil
-      day -> day |> Map.get(field) |> format_time()
+      day -> Map.get(day, field)
     end
-  end
-
-  defp find_day(period, day_of_week) do
-    days = if is_list(period.days), do: period.days, else: []
-    Enum.find(days, &(&1.day_of_week == day_of_week))
   end
 
   defp format_time(nil), do: nil

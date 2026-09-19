@@ -250,6 +250,50 @@ defmodule TymeslotWeb.Dashboard.AvailabilityTravelLiveTest do
       assert Process.alive?(view.pid)
     end
 
+    test "preserves the submitted label, dates and hours when an overlap is rejected", %{
+      conn: conn,
+      profile: profile
+    } do
+      insert(:travel_period,
+        profile: profile,
+        label: "Existing trip",
+        start_date: ~D[2027-08-01],
+        end_date: ~D[2027-08-15],
+        timezone: "Europe/Berlin"
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/dashboard/availability")
+
+      view
+      |> element("button[phx-click='show_travel_form']", "Add a trip")
+      |> render_click()
+
+      select_travel_timezone(view, "Europe/Berlin")
+
+      html =
+        view
+        |> form("#travel-form-modal form", %{
+          "label" => "Overlapping trip",
+          "start_date" => "2027-08-10",
+          "end_date" => "2027-08-20",
+          "days" => %{
+            "1" => %{"is_available" => "true", "start_time" => "09:00", "end_time" => "17:30"}
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "overlaps an existing trip"
+      # The rejected submission must still be on screen — not a blank form —
+      # so the host does not have to retype the label, dates and the one
+      # day's hours they had already set.
+      assert html =~ ~s(name="label" value="Overlapping trip")
+      assert html =~ ~s(name="start_date" value="2027-08-10")
+      assert html =~ ~s(name="end_date" value="2027-08-20")
+      assert html =~ ~s(name="days[1][is_available]" value="true" checked)
+      assert html =~ ~s(name="days[1][start_time]" value="09:00")
+      assert html =~ ~s(name="days[1][end_time]" value="17:30")
+    end
+
     test "warns on the trip list when a trip has no bookable hours", %{
       conn: conn,
       profile: profile
@@ -268,31 +312,51 @@ defmodule TymeslotWeb.Dashboard.AvailabilityTravelLiveTest do
       assert html =~ "No bookable hours set"
     end
 
-    test "does not warn once a trip has at least one bookable day", %{
+    test "the no-bookable-hours warning disappears once a day gets hours", %{
       conn: conn,
       profile: profile
     } do
       period =
         insert(:travel_period,
           profile: profile,
-          label: "Bookable trip",
+          label: "Transitioning trip",
           start_date: ~D[2027-09-15],
           end_date: ~D[2027-09-20],
           timezone: "Europe/Berlin"
         )
 
-      insert(:travel_period_day,
-        travel_period: period,
-        day_of_week: 1,
-        is_available: true,
-        start_time: ~T[09:00:00],
-        end_time: ~T[17:00:00]
-      )
+      {:ok, view, html} = live(conn, ~p"/dashboard/availability")
 
-      {:ok, _view, html} = live(conn, ~p"/dashboard/availability")
+      # A single test asserting both states, rather than one asserting only
+      # the absence of the warning: a `refute` alone would still pass
+      # against a deleted warning feature, since "never shown" and
+      # "correctly suppressed" render identically. Seeing the warning
+      # actually appear first is what makes the later `refute` meaningful.
+      assert html =~ "Transitioning trip"
+      assert html =~ "No bookable hours set"
 
-      assert html =~ "Bookable trip"
+      view
+      |> element("button[phx-click='show_travel_form'][phx-value-id='#{period.id}']")
+      |> render_click()
+
+      html =
+        view
+        |> form("#travel-form-modal form", %{
+          "label" => "Transitioning trip",
+          "start_date" => "2027-09-15",
+          "end_date" => "2027-09-20",
+          "timezone" => "Europe/Berlin",
+          "days" => %{
+            "1" => %{"is_available" => "true", "start_time" => "09:00", "end_time" => "17:00"}
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "Transitioning trip"
       refute html =~ "No bookable hours set"
+
+      [saved] = Travel.list_for_profile(profile.id)
+      assert Enum.any?(saved.days, &(&1.day_of_week == 1 and &1.is_available))
     end
   end
 end
