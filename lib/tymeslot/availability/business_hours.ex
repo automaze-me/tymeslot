@@ -7,6 +7,7 @@ defmodule Tymeslot.Availability.BusinessHours do
 
   alias Tymeslot.Availability.AvailabilityOverrideQueries
   alias Tymeslot.Availability.Calculate
+  alias Tymeslot.Availability.OwnerFrame
   alias Tymeslot.Availability.TimeSlots
   alias Tymeslot.Availability.WeeklySchedule
   alias Tymeslot.Utils.DateTimeUtils
@@ -57,11 +58,20 @@ defmodule Tymeslot.Availability.BusinessHours do
         config \\ %{}
       )
 
-  def get_business_hours_in_timezone(date, nil, owner_timezone, user_timezone, _config) do
-    get_business_hours_in_timezone_fallback(date, owner_timezone, user_timezone)
+  def get_business_hours_in_timezone(date, nil, owner_timezone, user_timezone, config) do
+    case OwnerFrame.for_date(date, owner_timezone, config) do
+      %{source: :travel, timezone: timezone, day: day} ->
+        business_hours_from_day(date, day, timezone, user_timezone)
+
+      %{source: :schedule} ->
+        get_business_hours_in_timezone_fallback(date, owner_timezone, user_timezone)
+    end
   end
 
   def get_business_hours_in_timezone(date, schedule_id, owner_timezone, user_timezone, config) do
+    # `owner_timezone` is the home-zone fallback, not necessarily the effective
+    # zone: a travel period covering `date` supplies its own zone and hours.
+    frame = OwnerFrame.for_date(date, owner_timezone, config)
     override = lookup_override(date, schedule_id, config)
 
     case override do
@@ -74,28 +84,34 @@ defmodule Tymeslot.Availability.BusinessHours do
           date,
           start_time,
           end_time,
-          owner_timezone,
+          frame.timezone,
           user_timezone
         )
 
       _no_override ->
-        day_of_week = Date.day_of_week(date)
-        day_availability = lookup_day_availability(day_of_week, schedule_id, config)
+        # A trip supplies the day; otherwise fall through to the schedule's own
+        # weekly lookup, which is why `frame.day` is nil outside a trip.
+        day_availability =
+          frame.day || lookup_day_availability(Date.day_of_week(date), schedule_id, config)
 
-        case day_availability do
-          %{is_available: true, start_time: start_time, end_time: end_time}
-          when start_time != nil and end_time != nil ->
-            convert_business_hours_to_user_timezone(
-              date,
-              start_time,
-              end_time,
-              owner_timezone,
-              user_timezone
-            )
+        business_hours_from_day(date, day_availability, frame.timezone, user_timezone)
+    end
+  end
 
-          _other ->
-            {:ok, %{start_datetime: nil, end_datetime: nil, selected_date: date}}
-        end
+  defp business_hours_from_day(date, day_availability, timezone, user_timezone) do
+    case day_availability do
+      %{is_available: true, start_time: start_time, end_time: end_time}
+      when start_time != nil and end_time != nil ->
+        convert_business_hours_to_user_timezone(
+          date,
+          start_time,
+          end_time,
+          timezone,
+          user_timezone
+        )
+
+      _other ->
+        {:ok, %{start_datetime: nil, end_datetime: nil, selected_date: date}}
     end
   end
 
