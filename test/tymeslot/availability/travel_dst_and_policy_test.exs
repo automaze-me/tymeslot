@@ -10,6 +10,7 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
   alias Tymeslot.Availability.Calculate
   alias Tymeslot.Availability.Travel
   alias Tymeslot.Bookings.Policy
+  alias Tymeslot.Utils.DateTimeUtils
 
   @home "America/New_York"
   @away "Europe/Berlin"
@@ -94,12 +95,15 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
           advance_booking_days: advance_booking_days
         )
 
+      # Closed at home on the trip's weekday: the trip must be the only thing
+      # that can open it. If both the home schedule and the trip offered
+      # Wednesday hours, a broken `OwnerFrame` that fell back to the home
+      # schedule would still produce slots and this fixture could never catch
+      # it — see the mutation evidence in the fix report for task 7b.
       insert(:weekly_availability,
         schedule: schedule,
         day_of_week: 3,
-        is_available: true,
-        start_time: ~T[09:00:00],
-        end_time: ~T[17:00:00]
+        is_available: false
       )
 
       meeting_type =
@@ -136,23 +140,45 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
 
       config = Policy.scheduling_config(user.id, meeting_type)
 
+      # All three policy values come from the schedule, never from the trip —
+      # `TravelPeriodSchema` has no fields for any of them.
+      assert config.buffer_minutes == 0
+      assert config.min_advance_hours == 0
       assert config.max_advance_booking_days == 10
 
-      # The trip date is 60-plus days out, well beyond a 10-day horizon. A trip
-      # supplies hours and a zone, never policy.
+      # The trip date is 60-plus days out, well beyond a 10-day horizon. The
+      # home schedule is closed on this weekday (see policy_setup/1), so a
+      # non-empty result here could only come from the trip's own hours —
+      # this proves the horizon gates a trip date even though the trip itself
+      # would otherwise open it.
       assert {:ok, []} =
                Calculate.available_slots(wednesday, 30, @home, config.owner_timezone, [], config)
     end
 
-    test "the same trip date is offered once the horizon allows it" do
+    test "the same trip date is offered once the horizon allows it, at the trip's hours" do
       %{user: user, meeting_type: meeting_type, wednesday: wednesday} = policy_setup(365)
 
       config = Policy.scheduling_config(user.id, meeting_type)
 
+      assert config.buffer_minutes == 0
+      assert config.min_advance_hours == 0
+      assert config.max_advance_booking_days == 365
+
       assert {:ok, slots} =
                Calculate.available_slots(wednesday, 30, @home, config.owner_timezone, [], config)
 
+      # The home schedule is closed on this weekday, so any slot at all proves
+      # the trip supplied it — and the exact time proves it came from the
+      # trip's 10:00 Berlin hours, not some other source.
+      expected =
+        wednesday
+        |> DateTime.new!(~T[10:00:00], @away)
+        |> DateTime.shift_zone!(@home)
+        |> DateTime.to_time()
+
       refute slots == []
+      assert {:ok, first} = DateTimeUtils.parse_time_string(List.first(slots))
+      assert first == expected
     end
   end
 end
