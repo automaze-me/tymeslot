@@ -7,6 +7,8 @@ defmodule Tymeslot.Emails.Templates.CalendarSyncError do
   reads the ambient locale for the pure date and time formatting.
   """
 
+  alias Tymeslot.Availability.Travel
+
   alias Tymeslot.Emails.Shared.{
     Callouts,
     Formatting,
@@ -132,11 +134,33 @@ defmodule Tymeslot.Emails.Templates.CalendarSyncError do
     "#{dgettext("emails", "Common causes:")}\n- #{causes}"
   end
 
+  # The host reads the time in the zone in effect on the meeting's own date —
+  # the covering trip's zone if one applies, else the profile's own zone —
+  # the same resolution `Tymeslot.Emails.AppointmentBuilder.owner_timezone/1`
+  # and `CalendarEmails.resolve_owner_timezone/1` use for every other
+  # host-addressed email. See the tradeoff/edge-case comment on the former
+  # for why the date is read in the host's home zone rather than UTC.
   defp owner_start_time(meeting) do
     owner_timezone =
       case meeting.organizer_user_id do
-        nil -> Profiles.get_default_timezone()
-        user_id -> Profiles.get_user_timezone(user_id)
+        nil ->
+          Profiles.get_default_timezone()
+
+        user_id ->
+          home_timezone = Profiles.get_user_timezone(user_id)
+
+          case meeting.start_time do
+            %DateTime{} = start_time ->
+              meeting_date =
+                start_time
+                |> TimezoneHelper.convert_to_timezone(home_timezone)
+                |> DateTime.to_date()
+
+              Travel.timezone_for_user_on(user_id, meeting_date)
+
+            _no_start_time ->
+              home_timezone
+          end
       end
 
     TimezoneHelper.convert_to_timezone(meeting.start_time, owner_timezone)
