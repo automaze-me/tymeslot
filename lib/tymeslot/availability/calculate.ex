@@ -6,10 +6,16 @@ defmodule Tymeslot.Availability.Calculate do
 
   alias Tymeslot.Availability.{AvailabilityOverrideQueries, WeeklyAvailabilityQueries}
   alias Tymeslot.Availability.{BusinessHours, Conflicts, Events, TimeSlots}
+  alias Tymeslot.Availability.Travel
   alias Tymeslot.Integrations.Calendar.CalendarEvent
   alias Tymeslot.Utils.DateTimeUtils
   alias Tymeslot.Validation.Constraints
 
+  # `:owner_timezone` is the owner's *home* zone. The zone actually in effect on
+  # a given date comes from `Tymeslot.Availability.OwnerFrame`, because a travel
+  # period covering that date supplies its own. `:travel_periods` carries a
+  # prefetched window; `:profile_id` lets `OwnerFrame` query per date when a
+  # caller could not prefetch.
   @type availability_config :: %{
           optional(:schedule_id) => pos_integer(),
           optional(:max_advance_booking_days) => pos_integer(),
@@ -21,7 +27,9 @@ defmodule Tymeslot.Availability.Calculate do
           optional(:fallback_availability_fn) => (Date.t() -> term()) | nil,
           optional(:owner_timezone) => String.t(),
           optional(:min_advance_hours) => non_neg_integer(),
-          optional(:limit_checker) => (DateTime.t() -> boolean()) | nil
+          optional(:limit_checker) => (DateTime.t() -> boolean()) | nil,
+          optional(:travel_periods) => list(term()),
+          optional(:profile_id) => integer()
         }
 
   @typedoc "The three scheduling policy values an `availability_config` carries."
@@ -399,6 +407,31 @@ defmodule Tymeslot.Availability.Calculate do
         start_date,
         end_date
       )
+    end)
+  end
+
+  @doc """
+  Loads the travel periods overlapping `start_date..end_date` into `config`.
+
+  A sibling of `prefetch_schedule_data/4` rather than part of it, because that
+  function is keyed by `schedule_id` and returns early when there is none,
+  while travel periods hang off the profile and apply to every meeting type.
+  Folding them in would silently skip the trip load for any caller without a
+  schedule.
+
+  `OwnerFrame` falls back to a query per date whenever `:travel_periods` is
+  absent and `:profile_id` is set, so any caller iterating dates has to
+  prefetch or pay a round trip per day. An existing `:travel_periods` key
+  wins, so a caller that already has the window passes it through untouched.
+  """
+  @spec prefetch_travel_periods(availability_config(), integer() | nil, Date.t(), Date.t()) ::
+          availability_config()
+  def prefetch_travel_periods(config, nil, _start_date, _end_date),
+    do: Map.put_new(config, :travel_periods, [])
+
+  def prefetch_travel_periods(config, profile_id, start_date, end_date) do
+    Map.put_new_lazy(config, :travel_periods, fn ->
+      Travel.for_window(profile_id, start_date, end_date)
     end)
   end
 
