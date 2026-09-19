@@ -27,6 +27,7 @@ defmodule Tymeslot.Availability.Audit do
   alias Tymeslot.Clock
   alias Tymeslot.Integrations.Calendar.CalendarEventQueries
   alias Tymeslot.Integrations.Calendar.CalendarIntegrationQueries
+  alias Tymeslot.Profiles
   alias Tymeslot.Profiles.ProfileQueries
 
   @default_duration_minutes 30
@@ -87,7 +88,7 @@ defmodule Tymeslot.Availability.Audit do
     horizon_days = Keyword.get(opts, :horizon_days, @default_horizon_days)
     start_date = Keyword.get(opts, :start_date, Clock.utc_today())
     end_date = Date.add(start_date, horizon_days)
-    timezone = profile.timezone
+    timezone = profile.timezone || Profiles.get_default_timezone()
 
     integration_ids =
       profile.user_id
@@ -107,6 +108,7 @@ defmodule Tymeslot.Availability.Audit do
       Map.merge(
         %{
           schedule_id: schedule_id,
+          profile_id: profile.id,
           duration_minutes: duration_minutes,
           buffer_minutes: Schedules.policy(schedule, :buffer_minutes),
           max_advance_booking_days: Schedules.policy(schedule, :advance_booking_days),

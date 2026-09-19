@@ -6,6 +6,7 @@ defmodule Tymeslot.Availability.AuditTest do
   import ExUnit.CaptureIO
 
   alias Tymeslot.Availability.Audit
+  alias Tymeslot.Availability.Travel
 
   defp setup_bookable_profile(username) do
     user = insert(:user)
@@ -112,6 +113,43 @@ defmodule Tymeslot.Availability.AuditTest do
       assert result.checked_days == 6
     end
 
+    test "reaches travel periods for a host who is travelling" do
+      # The config `audit/2` builds is compared against itself (month view vs.
+      # per-day picker), so a config that ignores trips entirely would still
+      # report zero disagreements here — both halves would just be equally
+      # wrong about the trip. That is exactly why disagreement counts cannot
+      # prove the fix: a trip-blind audit passes this same assertion. What
+      # only the fix can do is actually query `travel_periods` for this
+      # profile, which is what the telemetry assertion below checks.
+      username = "audit-travel-#{System.unique_integer([:positive])}"
+      profile = setup_bookable_profile(username)
+      monday = future_monday()
+
+      {:ok, trip} =
+        Travel.create_period(profile, %{
+          label: "Away",
+          start_date: monday,
+          end_date: Date.add(monday, 2),
+          timezone: "Pacific/Auckland"
+        })
+
+      {:ok, _day} =
+        Travel.set_day(profile, trip, %{
+          day_of_week: Date.day_of_week(monday),
+          is_available: true,
+          start_time: ~T[08:00:00],
+          end_time: ~T[10:00:00]
+        })
+
+      {result, query_count} =
+        count_travel_period_queries(profile.id, fn ->
+          Audit.audit(profile, start_date: monday, horizon_days: 3)
+        end)
+
+      assert query_count > 0
+      assert result.disagreements == []
+    end
+
     test "reports on a profile with no default schedule instead of crashing" do
       # Every profile gains a default schedule on creation and cannot delete it,
       # so this is a database that has lost one. The audit is the tool reached
@@ -126,6 +164,45 @@ defmodule Tymeslot.Availability.AuditTest do
       # The engine's hard-coded fallback hours apply, and both halves of it read
       # the same nil schedule, so they still have to agree with each other.
       assert result.disagreements == []
+    end
+  end
+
+  # Mirrors `Tymeslot.Availability.TravelQueryBudgetTest`'s own helper: counts
+  # queries against `travel_periods` bound to this profile id, so the count is
+  # a direct signal that the audited config actually carries `:profile_id`
+  # (or a prefetched `:travel_periods` list) rather than a coincidence of
+  # `disagreements` staying empty either way.
+  defp count_travel_period_queries(profile_id, fun) do
+    handler_id = {__MODULE__, make_ref()}
+    test_pid = self()
+
+    :telemetry.attach(
+      handler_id,
+      [:tymeslot, :repo, :query],
+      fn _event, _measurements, metadata, _config ->
+        if metadata[:source] == "travel_periods" and
+             profile_id in List.wrap(metadata[:params]) do
+          send(test_pid, {handler_id, :query})
+        end
+      end,
+      nil
+    )
+
+    result =
+      try do
+        fun.()
+      after
+        :telemetry.detach(handler_id)
+      end
+
+    {result, drain_query_count(handler_id)}
+  end
+
+  defp drain_query_count(handler_id, count \\ 0) do
+    receive do
+      {^handler_id, :query} -> drain_query_count(handler_id, count + 1)
+    after
+      0 -> count
     end
   end
 end

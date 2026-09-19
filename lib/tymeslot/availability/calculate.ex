@@ -29,7 +29,7 @@ defmodule Tymeslot.Availability.Calculate do
           optional(:min_advance_hours) => non_neg_integer(),
           optional(:limit_checker) => (DateTime.t() -> boolean()) | nil,
           optional(:travel_periods) => list(term()),
-          optional(:profile_id) => integer()
+          optional(:profile_id) => integer() | nil
         }
 
   @typedoc "The three scheduling policy values an `availability_config` carries."
