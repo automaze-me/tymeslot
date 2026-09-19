@@ -65,20 +65,21 @@ defmodule TymeslotWeb.Live.Scheduling.AvailabilityHelpers do
   query, so a trip starting the day after the window would otherwise resolve as
   no trip at all.
 
-  A nil profile yields no trips rather than raising, so the demo provider and
-  any caller without a resolved organiser behave as they did before.
+  Without a profile to resolve trips for — nil, or a struct with no saved id —
+  `config` comes back untouched rather than raising or carrying an empty list.
+  A `:travel_periods` list is authoritative in `OwnerFrame`, so writing `[]`
+  would assert "no trips" over a config that carries `:profile_id` and could
+  still have resolved them per date, re-opening the very disagreement this
+  function exists to close. `Calculate.prefetch_travel_periods/4` leaves a nil
+  profile alone for the same reason.
   """
   @spec put_travel_periods(map(), map() | nil, Date.t(), Date.t()) :: map()
-  def put_travel_periods(config, nil, _first_date, _last_date),
-    do: Map.put(config, :travel_periods, [])
-
   def put_travel_periods(config, %{id: profile_id}, first_date, last_date)
       when is_integer(profile_id) do
     Map.put(config, :travel_periods, Travel.for_window(profile_id, first_date, last_date))
   end
 
-  def put_travel_periods(config, _organizer_profile, _first_date, _last_date),
-    do: Map.put(config, :travel_periods, [])
+  def put_travel_periods(config, _organizer_profile, _first_date, _last_date), do: config
 
   @doc """
   Gets available slots for a specific date.

@@ -83,8 +83,18 @@ defmodule Tymeslot.Availability.Calculate do
     schedule_id = Map.get(config, :schedule_id)
     slot_interval_minutes = Map.get(config, :slot_interval_minutes)
 
-    # Prefetch schedule data once for all adjacent-day lookups
-    config = prefetch_schedule_data(config, schedule_id, Date.add(date, -1), Date.add(date, 1))
+    # Prefetch schedule data once for all adjacent-day lookups, trips included:
+    # `BusinessHours` resolves the day either side of `date` too, and each of
+    # those goes through `OwnerFrame`'s per-date query when only `:profile_id`
+    # is set.
+    profile_id = Map.get(config, :profile_id)
+    prefetch_from = Date.add(date, -1)
+    prefetch_to = Date.add(date, 1)
+
+    config =
+      config
+      |> prefetch_schedule_data(schedule_id, prefetch_from, prefetch_to)
+      |> prefetch_travel_periods(profile_id, prefetch_from, prefetch_to)
 
     with {:ok, business_hours_windows} <-
            BusinessHours.windows_for_target_date_or_error(
@@ -219,12 +229,17 @@ defmodule Tymeslot.Availability.Calculate do
       Events.convert_events_to_timezone(blocking_events, owner_timezone, user_timezone)
 
     schedule_id = Map.get(config, :schedule_id)
+    profile_id = Map.get(config, :profile_id)
 
     # Prefetch schedule data once for the entire range (with 1-day padding for adjacent-day checks)
+    prefetch_from = Date.add(start_date, -1)
+    prefetch_to = Date.add(end_date, 1)
+
     config =
       config
       |> Map.put(:duration_minutes, duration_minutes)
-      |> prefetch_schedule_data(schedule_id, Date.add(start_date, -1), Date.add(end_date, 1))
+      |> prefetch_schedule_data(schedule_id, prefetch_from, prefetch_to)
+      |> prefetch_travel_periods(profile_id, prefetch_from, prefetch_to)
 
     availability_map =
       Enum.reduce(Date.range(start_date, end_date), %{}, fn date, acc ->
@@ -311,9 +326,14 @@ defmodule Tymeslot.Availability.Calculate do
       if is_map(availability_map) or availability_map == :loading do
         config
       else
-        prefetch_schedule_data(
-          config,
+        config
+        |> prefetch_schedule_data(
           Map.get(config, :schedule_id),
+          Date.add(first_display_date, -1),
+          Date.add(end_date, 1)
+        )
+        |> prefetch_travel_periods(
+          Map.get(config, :profile_id),
           Date.add(first_display_date, -1),
           Date.add(end_date, 1)
         )

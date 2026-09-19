@@ -328,12 +328,15 @@ defmodule TymeslotWeb.Live.Scheduling.CalendarHelpers do
   # database.
   defp fallback_config(schedule, organizer_profile, week_start, meeting_type) do
     config = availability_config(schedule, organizer_profile, meeting_type)
+    prefetch_from = Date.add(week_start, -1)
+    prefetch_to = Date.add(week_start, 7)
 
-    Calculate.prefetch_schedule_data(
-      config,
-      schedule && schedule.id,
-      Date.add(week_start, -1),
-      Date.add(week_start, 7)
+    config
+    |> Calculate.prefetch_schedule_data(schedule && schedule.id, prefetch_from, prefetch_to)
+    |> Calculate.prefetch_travel_periods(
+      Map.get(organizer_profile, :id),
+      prefetch_from,
+      prefetch_to
     )
   end
 
@@ -352,7 +355,8 @@ defmodule TymeslotWeb.Live.Scheduling.CalendarHelpers do
           required(:min_advance_hours) => non_neg_integer(),
           required(:buffer_minutes) => non_neg_integer(),
           required(:duration_minutes) => pos_integer(),
-          required(:owner_timezone) => String.t()
+          required(:owner_timezone) => String.t(),
+          required(:profile_id) => integer() | nil
         }
   defp availability_config(schedule, organizer_profile, meeting_type) do
     %{
@@ -361,7 +365,14 @@ defmodule TymeslotWeb.Live.Scheduling.CalendarHelpers do
       min_advance_hours: Schedules.policy(schedule, :min_advance_hours),
       buffer_minutes: Schedules.policy(schedule, :buffer_minutes),
       duration_minutes: (meeting_type && meeting_type.duration_minutes) || 30,
-      owner_timezone: organizer_profile.timezone || Profiles.get_default_timezone()
+      owner_timezone: organizer_profile.timezone || Profiles.get_default_timezone(),
+      # Travel periods hang off the profile, so the grid carries the id and
+      # `Calculate.get_calendar_days/5` loads the window's trips exactly when it
+      # loads the weekly schedule it reads them beside. A profile map without a
+      # saved id (the demo provider's) reads as nil, which both
+      # `Calculate.prefetch_travel_periods/4` and `OwnerFrame` treat as
+      # "no trips" rather than raising.
+      profile_id: Map.get(organizer_profile, :id)
     }
   end
 end

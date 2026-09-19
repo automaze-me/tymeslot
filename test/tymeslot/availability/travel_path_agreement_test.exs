@@ -15,6 +15,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
 
   @home "America/New_York"
   @away "Europe/Berlin"
+  @active "Asia/Tokyo"
 
   # A Wednesday at least `days_ahead` out, so the test never rots as the clock
   # moves and never depends on a hard-coded year.
@@ -72,14 +73,68 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
         end_time: ~T[16:00:00]
       })
 
+    # A trip that is active *today*, in a third zone. Without it every
+    # post-return assertion below would also pass for an implementation that
+    # resolved the zone from today's date instead of the slot's, because today
+    # would be trip-free. The ~58-day gap keeps it clear of the trip above,
+    # which Stage 1's overlap validation would otherwise refuse.
+    {:ok, active_trip} =
+      Travel.create_period(profile, %{
+        label: "Tokyo",
+        start_date: Date.utc_today(),
+        end_date: Date.add(Date.utc_today(), 1),
+        timezone: @active
+      })
+
+    # A trip whose first day is one day past the date a caller would be
+    # viewing, for the window padding the display path's call sites apply.
+    {:ok, next_trip} =
+      Travel.create_period(profile, %{
+        label: "Lisbon",
+        start_date: Date.add(after_trip, 8),
+        end_date: Date.add(after_trip, 10),
+        timezone: @away
+      })
+
     %{
       user: user,
       profile: profile,
       schedule: schedule,
       meeting_type: meeting_type,
       in_trip: in_trip,
-      after_trip: after_trip
+      after_trip: after_trip,
+      active_trip: active_trip,
+      next_trip: next_trip
     }
+  end
+
+  describe "resolution keys off the slot's date" do
+    test "a date after the host returns resolves home while a trip is active today", ctx do
+      # Guards the proof rather than the behaviour: if the active trip ever
+      # stopped covering today, everything below would pass for the wrong
+      # reason.
+      assert ctx.active_trip.timezone == @active
+      refute Travel.for_window(ctx.profile.id, Date.utc_today(), Date.utc_today()) == []
+
+      config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+
+      {:ok, slots} =
+        Calculate.available_slots(ctx.after_trip, 30, @home, config.owner_timezone, [], config)
+
+      # 09:00 is the home schedule. Tokyo would put the first slot at 20:00 the
+      # evening before, Berlin at 04:00 — so this pins the answer to the slot's
+      # own date, and would survive a refactor that resolved one effective zone
+      # per mount.
+      refute slots == []
+      assert {:ok, ~T[09:00:00]} = DateTimeUtils.parse_time_string(List.first(slots))
+
+      display_config =
+        ctx.schedule
+        |> AvailabilityHelpers.schedule_config(ctx.meeting_type, nil, 30)
+        |> AvailabilityHelpers.put_travel_periods(ctx.profile, ctx.after_trip, ctx.after_trip)
+
+      assert display_config.travel_periods == []
+    end
   end
 
   describe "the submit path" do
@@ -209,6 +264,40 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
       assert display_config.travel_periods == []
     end
 
+    test "the padded window the call sites use carries a trip that starts the day after", ctx do
+      eve = Date.add(ctx.next_trip.start_date, -1)
+      config = AvailabilityHelpers.schedule_config(ctx.schedule, ctx.meeting_type, nil, 30)
+
+      unpadded = AvailabilityHelpers.put_travel_periods(config, ctx.profile, eve, eve)
+
+      padded =
+        AvailabilityHelpers.put_travel_periods(
+          config,
+          ctx.profile,
+          Date.add(eve, -1),
+          Date.add(eve, 1)
+        )
+
+      # `available_slots/6` resolves `eve + 1` as well as `eve`, and a
+      # prefetched list is authoritative in `OwnerFrame`, so an unpadded window
+      # would tell the display path there is no trip on a day the submit path
+      # resolves one — a slot offered and then refused.
+      assert unpadded.travel_periods == []
+      assert Enum.map(padded.travel_periods, & &1.id) == [ctx.next_trip.id]
+    end
+
+    test "a config with no resolved organiser is left untouched", ctx do
+      config = AvailabilityHelpers.schedule_config(ctx.schedule, ctx.meeting_type, nil, 30)
+
+      # Not `travel_periods: []`: an explicit list would assert "no trips" over
+      # a config that carries `:profile_id` and could still resolve them.
+      assert AvailabilityHelpers.put_travel_periods(config, nil, ctx.in_trip, ctx.in_trip) ==
+               config
+
+      assert AvailabilityHelpers.put_travel_periods(config, %{}, ctx.in_trip, ctx.in_trip) ==
+               config
+    end
+
     test "the slots the display path offers inside a trip are the slots the submit path accepts",
          ctx do
       assert_paths_agree(ctx, ctx.in_trip)
@@ -296,9 +385,9 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
   end
 
   # The gate assertion. Nothing here is compared against a hand-written time:
-  # the slot list is computed from the *display* path's config (built the way
-  # `AvailabilityHelpers` builds it, trips prefetched) and then handed to the
-  # *submit* path — first as a whole, by comparing it with the list the submit
+  # the slot list is computed from the *display* path's config — built the way
+  # `AvailabilityHelpers` builds it, including the one-day padding its call
+  # sites apply — and then handed to the *submit* path — first as a whole, by comparing it with the list the submit
   # config yields, and then slot by slot through the re-check that guards a real
   # booking. Two paths checked against the same literal could agree with the
   # literal and still disagree with each other; these assertions can only pass
@@ -309,7 +398,11 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
     display_config =
       ctx.schedule
       |> AvailabilityHelpers.schedule_config(ctx.meeting_type, nil, 30)
-      |> AvailabilityHelpers.put_travel_periods(ctx.profile, date, date)
+      |> AvailabilityHelpers.put_travel_periods(
+        ctx.profile,
+        Date.add(date, -1),
+        Date.add(date, 1)
+      )
 
     {:ok, offered} = Calculate.available_slots(date, 30, @home, @home, [], display_config)
 
