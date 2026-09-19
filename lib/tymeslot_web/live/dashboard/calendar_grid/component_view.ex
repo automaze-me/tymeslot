@@ -97,6 +97,7 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.ComponentView do
           sync_completed={@sync_completed}
           date={@date}
           guest_rsvp_summaries={@guest_rsvp_summaries}
+          active_travel_period={@active_travel_period}
           myself={@myself}
         />
         <GridViews.month_view

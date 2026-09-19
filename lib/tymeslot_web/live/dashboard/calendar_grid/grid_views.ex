@@ -38,6 +38,7 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.GridViews do
   attr :sync_completed, :integer, required: true
   attr :date, :any, required: true
   attr :guest_rsvp_summaries, :map, default: %{}
+  attr :active_travel_period, :map, default: nil
   attr :myself, :any, required: true
 
   @spec week_day_view(map()) :: Phoenix.LiveView.Rendered.t()
@@ -65,6 +66,7 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.GridViews do
       sync_completed={@sync_completed}
       oldest_sync_at={@oldest_sync_at}
       myself={@myself}
+      active_trip={@active_travel_period}
     />
 
     <div class={if @is_timed, do: "contents", else: "hidden"}>

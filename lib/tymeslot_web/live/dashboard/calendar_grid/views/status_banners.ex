@@ -12,6 +12,7 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.Views.StatusBanners do
   attr :sync_completed, :integer, required: true
   attr :oldest_sync_at, :any
   attr :myself, :any, required: true
+  attr :active_trip, :map, default: nil
 
   @spec status_banners(map()) :: Phoenix.LiveView.Rendered.t()
   def status_banners(assigns) do
@@ -60,6 +61,18 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.Views.StatusBanners do
         <span>{dgettext("dashboard_calendar", "Syncing calendars%{progress}...",
           progress: @sync_progress
         )}</span>
+      </div>
+      <div
+        :if={@active_trip}
+        class="flex items-center gap-2 px-3 py-1.5 md:px-4 bg-turquoise-50 border-b border-turquoise-200 text-token-sm text-turquoise-800"
+      >
+        <.icon name="hero-globe-europe-africa" class="w-4 h-4 shrink-0" />
+        <span>
+          {dgettext("dashboard_calendar", "Showing times in %{zone} — %{label}",
+            zone: @active_trip.timezone,
+            label: @active_trip.label
+          )}
+        </span>
       </div>
     </div>
     """

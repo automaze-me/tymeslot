@@ -3,6 +3,7 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.Helpers.DataLoading do
 
   import Phoenix.Component, only: [assign: 3]
 
+  alias Tymeslot.Availability.Travel
   alias Tymeslot.CalendarGrid
   alias Tymeslot.Integrations.Calendar.Appearance
   alias Tymeslot.Integrations.Calendar.Selection
@@ -123,15 +124,39 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.Helpers.DataLoading do
   @spec assign_timezone(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
   def assign_timezone(socket) do
     assigns = socket.assigns
-    raw_tz = get_in(assigns, [:profile, Access.key(:timezone)]) || Timezones.fallback()
+    active_period = active_travel_period(assigns[:profile])
+
+    # A trip covering today wins over the profile's own zone; the rest of the
+    # chain is unchanged, so an account with no trips resolves exactly as before.
+    raw_tz =
+      (active_period && active_period.timezone) ||
+        get_in(assigns, [:profile, Access.key(:timezone)]) ||
+        Timezones.fallback()
+
     user_id = get_in(assigns, [:current_user, Access.key(:id)])
     tz = Timezones.validate_or_utc(raw_tz, user_id: user_id)
 
     socket
     |> assign(:user_timezone, tz)
+    |> assign(:active_travel_period, active_period)
     |> assign(:timezone_display, Timezones.format(tz))
     |> assign(:timezone_country_code, Timezones.country_code(tz))
   end
+
+  # Today is taken in UTC rather than in the host's own zone, because which zone
+  # that is, is what this function is resolving. The consequence is a window of
+  # a few hours around a trip's first or last midnight where the grid may still
+  # show the other zone; it corrects itself on the next load.
+  defp active_travel_period(%{id: profile_id}) when is_integer(profile_id) do
+    today = Date.utc_today()
+
+    case Travel.for_window(profile_id, today, today) do
+      [period | _rest] -> period
+      [] -> nil
+    end
+  end
+
+  defp active_travel_period(_profile), do: nil
 
   @spec range_for_view(map()) :: {DateTime.t(), DateTime.t()}
   def range_for_view(%{view: :week, date: date} = assigns) do
