@@ -65,8 +65,15 @@ defmodule Tymeslot.Availability.OfferTest do
       offer = Offer.config(schedule, meeting_type, nil, 60)
       submit = Policy.scheduling_config(user.id, meeting_type)
 
+      # `:profile_id` is exempt because it is not a scheduling rule: it is the
+      # handle `Tymeslot.Availability.OwnerFrame` falls back to when resolving
+      # the travel periods covering a date. The submit path carries it because
+      # no date is in scope there to prefetch for; the display path prefetches
+      # the window's trips into `:travel_periods` instead (see
+      # `Offer.put_travel_periods/4`). Both readings reach the same resolver,
+      # so the rules below still have to agree exactly.
       assert Map.drop(offer, [:limit_checker, :duration_minutes]) ==
-               Map.drop(submit, [:owner_timezone])
+               Map.drop(submit, [:owner_timezone, :profile_id])
 
       assert offer.buffer_minutes == 15
       assert offer.min_advance_hours == 6
