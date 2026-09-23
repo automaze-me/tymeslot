@@ -7,7 +7,7 @@ defmodule Tymeslot.Availability.Travel do
   `Tymeslot.Bookings.Policy.scheduling_config/2` (the submit path) and the
   booking page's display path. Having one resolver is what makes the two paths
   structurally unable to disagree about which trips apply — the same reason
-  `Policy.slot_interval_minutes/1` exists.
+  `Schedules.slot_interval_minutes/1` exists.
 
   `timezone_on/2` and `timezone_for_user_on/2` are the display-side
   counterpart: which zone a profile (or a booking's organiser) is on for a

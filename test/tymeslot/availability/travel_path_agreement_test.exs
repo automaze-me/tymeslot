@@ -7,11 +7,11 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
   import Tymeslot.Factory
 
   alias Tymeslot.Availability.Calculate
+  alias Tymeslot.Availability.Offer
   alias Tymeslot.Availability.Travel
   alias Tymeslot.Bookings.Policy
   alias Tymeslot.Bookings.ScheduleCheck
   alias Tymeslot.Utils.DateTimeUtils
-  alias TymeslotWeb.Live.Scheduling.AvailabilityHelpers
 
   @home "America/New_York"
   @away "Europe/Berlin"
@@ -130,8 +130,8 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
 
       display_config =
         ctx.schedule
-        |> AvailabilityHelpers.schedule_config(ctx.meeting_type, nil, 30)
-        |> AvailabilityHelpers.put_travel_periods(ctx.profile, ctx.after_trip, ctx.after_trip)
+        |> Offer.config(ctx.meeting_type, nil, 30)
+        |> Offer.put_travel_periods(ctx.profile, ctx.after_trip, ctx.after_trip)
 
       assert display_config.travel_periods == []
     end
@@ -243,8 +243,8 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
     test "the display path resolves the same trips as the submit path", ctx do
       display_config =
         ctx.schedule
-        |> AvailabilityHelpers.schedule_config(ctx.meeting_type, nil, 30)
-        |> AvailabilityHelpers.put_travel_periods(ctx.profile, ctx.in_trip, ctx.in_trip)
+        |> Offer.config(ctx.meeting_type, nil, 30)
+        |> Offer.put_travel_periods(ctx.profile, ctx.in_trip, ctx.in_trip)
 
       expected_ids =
         ctx.profile.id
@@ -258,20 +258,20 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
     test "the display path carries no trips for a post-return window", ctx do
       display_config =
         ctx.schedule
-        |> AvailabilityHelpers.schedule_config(ctx.meeting_type, nil, 30)
-        |> AvailabilityHelpers.put_travel_periods(ctx.profile, ctx.after_trip, ctx.after_trip)
+        |> Offer.config(ctx.meeting_type, nil, 30)
+        |> Offer.put_travel_periods(ctx.profile, ctx.after_trip, ctx.after_trip)
 
       assert display_config.travel_periods == []
     end
 
     test "the padded window the call sites use carries a trip that starts the day after", ctx do
       eve = Date.add(ctx.next_trip.start_date, -1)
-      config = AvailabilityHelpers.schedule_config(ctx.schedule, ctx.meeting_type, nil, 30)
+      config = Offer.config(ctx.schedule, ctx.meeting_type, nil, 30)
 
-      unpadded = AvailabilityHelpers.put_travel_periods(config, ctx.profile, eve, eve)
+      unpadded = Offer.put_travel_periods(config, ctx.profile, eve, eve)
 
       padded =
-        AvailabilityHelpers.put_travel_periods(
+        Offer.put_travel_periods(
           config,
           ctx.profile,
           Date.add(eve, -1),
@@ -287,14 +287,14 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
     end
 
     test "a config with no resolved organiser is left untouched", ctx do
-      config = AvailabilityHelpers.schedule_config(ctx.schedule, ctx.meeting_type, nil, 30)
+      config = Offer.config(ctx.schedule, ctx.meeting_type, nil, 30)
 
       # Not `travel_periods: []`: an explicit list would assert "no trips" over
       # a config that carries `:profile_id` and could still resolve them.
-      assert AvailabilityHelpers.put_travel_periods(config, nil, ctx.in_trip, ctx.in_trip) ==
+      assert Offer.put_travel_periods(config, nil, ctx.in_trip, ctx.in_trip) ==
                config
 
-      assert AvailabilityHelpers.put_travel_periods(config, %{}, ctx.in_trip, ctx.in_trip) ==
+      assert Offer.put_travel_periods(config, %{}, ctx.in_trip, ctx.in_trip) ==
                config
     end
 
@@ -314,14 +314,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
       submit_config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
 
       {:ok, page_slots} =
-        AvailabilityHelpers.get_available_slots(
-          Date.to_iso8601(ctx.in_trip),
-          30,
-          @home,
-          ctx.user.id,
-          ctx.profile,
-          context(ctx)
-        )
+        Offer.slots_for_date(request(ctx), Date.to_iso8601(ctx.in_trip), 30)
 
       {:ok, submit_slots} =
         Calculate.available_slots(
@@ -347,15 +340,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
       thursday = Date.add(ctx.in_trip, 1)
 
       {:ok, availability} =
-        AvailabilityHelpers.get_range_availability(
-          ctx.user.id,
-          ctx.in_trip,
-          thursday,
-          @home,
-          ctx.profile,
-          context(ctx),
-          30
-        )
+        Offer.days_in_range(request(ctx), ctx.in_trip, thursday, 30)
 
       {:ok, submit_thursday_slots} =
         Calculate.available_slots(
@@ -375,18 +360,22 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
 
   # The calendar seam the flow already has for tests: a one-argument function
   # stands in for the provider, so this asks nothing of the calendar layer.
-  defp context(ctx) do
+  # `Tymeslot.Availability.Offer` took over the display path's slot and range
+  # call sites, so these tests drive it through its own request map rather than
+  # the old `AvailabilityHelpers` arguments.
+  defp request(ctx) do
     %{
-      demo_mode: false,
-      organizer_profile: ctx.profile,
+      profile: ctx.profile,
+      user_timezone: @home,
       meeting_type: ctx.meeting_type,
+      demo_mode?: false,
       debug_calendar_module: fn _organizer_user_id -> {:ok, []} end
     }
   end
 
   # The gate assertion. Nothing here is compared against a hand-written time:
   # the slot list is computed from the *display* path's config — built the way
-  # `AvailabilityHelpers` builds it, including the one-day padding its call
+  # `Offer` builds it, including the one-day padding its call
   # sites apply — and then handed to the *submit* path — first as a whole, by comparing it with the list the submit
   # config yields, and then slot by slot through the re-check that guards a real
   # booking. Two paths checked against the same literal could agree with the
@@ -397,8 +386,8 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
 
     display_config =
       ctx.schedule
-      |> AvailabilityHelpers.schedule_config(ctx.meeting_type, nil, 30)
-      |> AvailabilityHelpers.put_travel_periods(
+      |> Offer.config(ctx.meeting_type, nil, 30)
+      |> Offer.put_travel_periods(
         ctx.profile,
         Date.add(date, -1),
         Date.add(date, 1)

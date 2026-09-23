@@ -18,6 +18,12 @@ defmodule Tymeslot.Integrations.Calendar.ProviderCalendarEventQueries do
   # a rename cannot leave a stale literal behind in a `where` clause that would
   # then silently match nothing.
   @role_busy_only EventRole.busy_only()
+  @sync_state_locally_deleted "locally_deleted"
+
+  # The columns a dashboard edit may change on a cached row: what a user can
+  # edit on an event, plus the video room an edit can attach to it.
+  @local_edit_fields ~w(summary description location start_at end_at all_day start_date end_date
+                        reminders recurrence_rule colour attendees video_link video_integration_id)a
 
   @doc """
   Returns all cached events for the given integration IDs within a time range.
@@ -34,6 +40,14 @@ defmodule Tymeslot.Integrations.Calendar.ProviderCalendarEventQueries do
   Availability reads `CalendarEventQueries.in_range/2` instead, which excludes
   the other side. Every provider but Exchange writes only `both` rows, so
   neither filter changes what they return.
+
+  A row the organiser has deleted is also excluded, even while the delete is
+  still queued for the server: the flash says the event is gone and will be
+  retried, so leaving it drawn contradicts it. Availability deliberately keeps
+  counting the row until the delete lands, because the event is still on the
+  server and the slot is not free yet. This used to happen by accident — the
+  queue tag blanked the timing columns the overlap test reads — and stopped
+  the moment that blanking was fixed.
 
   ## Options
 
@@ -54,6 +68,7 @@ defmodule Tymeslot.Integrations.Calendar.ProviderCalendarEventQueries do
     ProviderCalendarEventSchema
     |> where([e], e.calendar_integration_id in ^integration_ids)
     |> where([e], e.role != ^@role_busy_only)
+    |> where([e], e.sync_state != ^@sync_state_locally_deleted)
     |> where_overlapping_range(range_start, range_end)
     |> order_by([e], asc: coalesce(e.start_at, type(e.start_date, :utc_datetime_usec)))
     |> maybe_limit(limit)
@@ -414,6 +429,25 @@ defmodule Tymeslot.Integrations.Calendar.ProviderCalendarEventQueries do
       :transparency
     ])
     |> Repo.update()
+  end
+
+  @doc """
+  Writes a dashboard edit Tymeslot has just pushed to the provider onto the
+  cached row, touching only the columns a user can edit (#{Enum.map_join(@local_edit_fields, ", ", &"`#{&1}`")}).
+
+  Unlike `upsert_batch/1`'s full-row replace, everything the provider owns
+  (`etag`, `raw_ical`, `recurring_event_id`, `organiser`, ...) keeps its
+  value until the next inbound sync. Keys outside that list are ignored.
+  """
+  @spec apply_local_edit(integer(), String.t(), map()) ::
+          {:ok, ProviderCalendarEventSchema.t()} | {:error, :not_found | Changeset.t()}
+  def apply_local_edit(calendar_integration_id, uid, attrs) when is_map(attrs) do
+    with {:ok, event} <- get_by_uid(calendar_integration_id, uid) do
+      event
+      |> Changeset.cast(attrs, @local_edit_fields)
+      |> Changeset.foreign_key_constraint(:video_integration_id)
+      |> Repo.update()
+    end
   end
 
   @doc """

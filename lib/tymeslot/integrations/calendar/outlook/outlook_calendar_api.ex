@@ -179,6 +179,19 @@ defmodule Tymeslot.Integrations.Calendar.Outlook.CalendarAPI do
   end
 
   @doc """
+  Fetches one event of the signed-in user by its Graph event id, whichever
+  calendar holds it. A deleted event answers 404; a cancelled meeting can
+  still come back with `"isCancelled" => true`.
+  """
+  @impl CalendarAPIBehaviour
+  @spec get_event(CalendarIntegrationSchema.t(), String.t()) :: {:ok, map()} | api_error()
+  def get_event(%CalendarIntegrationSchema{} = integration, event_id) do
+    AccessToken.with_access_token(integration, &__MODULE__.refresh_token/1, fn token ->
+      make_request(:get, "/me/events/#{event_id}", token, %{})
+    end)
+  end
+
+  @doc """
   Deletes an event from the primary calendar.
   """
   @impl CalendarAPIBehaviour
@@ -233,7 +246,13 @@ defmodule Tymeslot.Integrations.Calendar.Outlook.CalendarAPI do
         "scope" => current_scope
       }
 
-      case TokenFlow.refresh_token(@token_url, body, provider: :outlook) do
+      case TokenFlow.refresh_token(@token_url, body,
+             log_context: [
+               integration_id: integration.id,
+               user_id: integration.user_id,
+               provider: :outlook
+             ]
+           ) do
         {:ok, response} ->
           expires_in = response["expires_in"] || 3600
           expires_at = DateTime.add(DateTime.utc_now(), expires_in, :second)

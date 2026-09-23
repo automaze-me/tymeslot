@@ -207,8 +207,6 @@ defmodule TymeslotWeb.DashboardLive do
         step_index={@tour_step_index}
         total_steps={@tour_total_steps}
       />
-      <.flash_group flash={@flash} id="dashboard-flash-group" />
-
       <%!-- Content --%>
       <div class={if @live_action == :calendar, do: "flex-1 flex flex-col min-h-0", else: ""}>
         <%= if @live_action == :calendar do %>
@@ -442,8 +440,8 @@ defmodule TymeslotWeb.DashboardLive do
   def handle_info({:event_move_result, result}, socket),
     do: result |> CalendarEventHandlers.handle_event_move_result(socket) |> rebuild_agenda()
 
-  def handle_info({:video_sync_result, event_id, result}, socket),
-    do: CalendarEventHandlers.handle_video_sync_result(event_id, result, socket)
+  def handle_info({:event_video_result, result}, socket),
+    do: CalendarEventHandlers.handle_event_video_result(result, socket)
 
   def handle_info({:execute_create_event, payload}, socket),
     do: CalendarEventHandlers.handle_execute_create_event(payload, socket)
@@ -480,13 +478,9 @@ defmodule TymeslotWeb.DashboardLive do
     do: TourEventHandlers.handle_event(action, params, socket)
 
   def handle_event("onboarding:toggle", %{"id" => key}, socket) do
-    user = socket.assigns.current_user
-
-    with true <- OnboardingChecklist.toggleable_item?(key),
-         {:ok, user} <- Onboarding.toggle_dashboard_setup_item(user, key) do
-      {:noreply, assign(socket, :current_user, user)}
-    else
-      _invalid_or_error -> {:noreply, socket}
+    case Onboarding.toggle_dashboard_setup_item(socket.assigns.current_user, key) do
+      {:ok, user} -> {:noreply, assign(socket, :current_user, user)}
+      {:error, _reason} -> {:noreply, socket}
     end
   end
 

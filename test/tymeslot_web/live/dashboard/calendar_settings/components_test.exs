@@ -2,6 +2,7 @@ defmodule TymeslotWeb.Dashboard.CalendarSettings.ComponentsTest do
   use TymeslotWeb.ConnCase, async: true
 
   @moduletag :utils
+  @moduletag :calendar
 
   import Phoenix.LiveViewTest
   alias Tymeslot.Integrations.Calendar.CalendarEntry
@@ -44,6 +45,37 @@ defmodule TymeslotWeb.Dashboard.CalendarSettings.ComponentsTest do
 
       assert Components.calendar_summary(integration) ==
                "booking target can no longer accept bookings"
+    end
+
+    # Booking writes to the configured calendar, not to the primary, so a
+    # read-only booking calendar must be reported even while the primary can
+    # still be written.
+    test "warns when the booking calendar turned read-only while the primary stays writable" do
+      integration =
+        summary_integration(
+          provider: "google",
+          default_booking_calendar_id: "cal-team",
+          calendar_list: [
+            %CalendarEntry{id: "cal-team", name: "Team", read_only: true, primary: false},
+            %CalendarEntry{id: "cal-primary", name: "Primary", read_only: false, primary: true}
+          ]
+        )
+
+      assert Components.calendar_summary(integration) ==
+               "booking target can no longer accept bookings"
+    end
+
+    test "does not name the primary when the booking calendar is no longer listed" do
+      integration =
+        summary_integration(
+          provider: "google",
+          default_booking_calendar_id: "cal-gone",
+          calendar_list: [
+            %CalendarEntry{id: "cal-primary", name: "Primary", read_only: false, primary: true}
+          ]
+        )
+
+      assert Components.calendar_summary(integration) == ""
     end
 
     test "stays silent (no warning) when no booking target has ever been configured" do
@@ -105,6 +137,38 @@ defmodule TymeslotWeb.Dashboard.CalendarSettings.ComponentsTest do
 
       assert Components.calendar_summary(integration) ==
                "read-only, blocks time but takes no bookings"
+    end
+
+    # Only the OAuth providers record an account email, so before this the line
+    # for a CalDAV row started at the conflict-check segment and named neither
+    # the account nor the server it belonged to.
+    test "names the server when the provider records no account email" do
+      integration =
+        summary_integration(base_url: "https://cloud.example.com:8443/nextcloud")
+
+      assert Components.calendar_summary(integration) == "cloud.example.com:8443/nextcloud"
+    end
+
+    # The server URL field takes free text, so a password typed into it must
+    # not reach the dashboard.
+    test "never renders credentials embedded in the server URL" do
+      integration = summary_integration(base_url: "https://admin:hunter2@cloud.example.com")
+
+      summary = Components.calendar_summary(integration)
+
+      assert summary == "cloud.example.com"
+      refute summary =~ "hunter2"
+    end
+
+    test "prefers the account email over the server when the provider records one" do
+      integration =
+        summary_integration(
+          provider: "google",
+          provider_account_email: "organiser@example.com",
+          base_url: "https://www.googleapis.com"
+        )
+
+      assert Components.calendar_summary(integration) == "organiser@example.com"
     end
   end
 
@@ -446,7 +510,6 @@ defmodule TymeslotWeb.Dashboard.CalendarSettings.ComponentsTest do
         provider: "caldav",
         provider_account_email: nil,
         is_active: false,
-        last_sync_at: nil,
         default_booking_calendar_id: nil,
         calendar_list: []
       },

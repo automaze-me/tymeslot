@@ -3,7 +3,7 @@ defmodule Tymeslot.Integrations.Calendar.CalDAV.Http do
   CalDAV transport layer.
 
   Provides credential-aware wrappers for the WebDAV/CalDAV HTTP methods
-  (PROPFIND, REPORT, PUT, DELETE, HEAD). Encodes Basic Auth credentials,
+  (PROPFIND, REPORT, GET, PUT, DELETE, HEAD). Encodes Basic Auth credentials,
   constructs method-specific headers, and maps raw HTTP status codes and
   transport exceptions into the typed `error_reason()` vocabulary.
 
@@ -221,6 +221,39 @@ defmodule Tymeslot.Integrations.Calendar.CalDAV.Http do
   end
 
   @doc """
+  Performs a GET request for a single calendar object resource.
+
+  Answers with the server's current iCalendar document and, in the response
+  headers, the ETag that identifies it — the pair a property-level patch has
+  to be applied to, since patching anything older would revert whatever
+  changed on the server in between.
+
+  Unlike DELETE, a 404 is an error here (`:not_found`), and so is a 410
+  (`:gone`): the caller is asking whether the event exists.
+  """
+  @spec get_event(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, Req.Response.t()} | {:error, CalDAVBase.error_reason()}
+  def get_event(url, username, password, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, 30_000)
+
+    result =
+      authed_request("GET", url, username, password, [], fn headers ->
+        Config.http_client_module().get(url, headers,
+          receive_timeout: timeout,
+          ssrf_protect: true
+        )
+      end)
+
+    case result do
+      {:ok, response} ->
+        classify(response, :get, url, success: [200], status_overrides: %{410 => :gone})
+
+      {:error, reason} ->
+        handle_read_transport_error(reason, :get)
+    end
+  end
+
+  @doc """
   Performs a HEAD request to retrieve current headers (e.g., ETag) for an event.
   """
   @spec head_event(String.t(), String.t(), String.t(), keyword()) ::
@@ -353,7 +386,7 @@ defmodule Tymeslot.Integrations.Calendar.CalDAV.Http do
       :update ->
         case Keyword.get(opts, :if_match) do
           nil -> headers ++ [{"If-Match", "*"}]
-          etag -> headers ++ [{"If-Match", etag}]
+          etag -> headers ++ [{"If-Match", if_match_value(etag)}]
         end
 
       # Unconditional overwrite: no If-Match at all. Used by the :keep_local
@@ -369,6 +402,27 @@ defmodule Tymeslot.Integrations.Calendar.CalDAV.Http do
         headers
     end
   end
+
+  # `If-Match` takes a *quoted* entity-tag (RFC 9110 section 8.8.3). Cached
+  # ETags reach us with the quotes already stripped, since
+  # `EventProcessor.clean_etag/1` removes them so the same tag compares equal
+  # however a server spells it, so they have to be re-quoted here. Sending the
+  # bare token instead is a malformed precondition the server can only reject,
+  # and the rejection arrives as a 412: indistinguishable from a genuine
+  # conflict, so the write is dropped and the organiser is told their change
+  # was reverted. Idempotent, so a caller holding a tag still in wire form (the
+  # HEAD probe and the read-back both return the raw header) is unaffected, and
+  # a weak tag keeps its prefix.
+  defp if_match_value("*"), do: "*"
+
+  defp if_match_value(etag) when is_binary(etag) do
+    case String.trim(etag) do
+      "W/" <> tag -> "W/" <> quote_entity_tag(tag)
+      tag -> quote_entity_tag(tag)
+    end
+  end
+
+  defp quote_entity_tag(tag), do: ~s("#{String.trim(tag, ~s("))}")
 
   defp handle_read_transport_error(%Mint.TransportError{reason: :timeout}, _method),
     do: {:error, :timeout}

@@ -104,7 +104,7 @@ defmodule Tymeslot.Mailer.SmtpProbeTest do
         assert :ok = SmtpProbe.test_connection(relay_config(relay, cacertfile: certs.cacertfile))
       end)
 
-      assert_receive {:smtp_relay, :tls_up}
+      assert_receive {:smtp_relay, {:tls_up, _info}}
     end
 
     # The probe used to stop at the plain-text greeting, reporting the mailer
@@ -128,6 +128,47 @@ defmodule Tymeslot.Mailer.SmtpProbeTest do
         assert message =~ "SMTP_SSL=true"
       end)
     end
+
+    # The probe restated the sender's TLS options instead of taking them, and
+    # so kept requiring the middlebox ChangeCipherSpec after the sender had
+    # stopped: on a relay that omits that record the probe failed with
+    # `:tls_failed` while every send went through, reporting a working mailer
+    # broken at every boot.
+    #
+    # A relay that actually omits the record cannot be built out of `:ssl` —
+    # an OTP server sends it precisely when the client's session id says the
+    # client is in middlebox mode — so the assertion is on that session id,
+    # which is what the option controls and what the relay decides from.
+    test "handshakes with the middlebox compatibility mode the sender uses",
+         %{certs: certs} do
+      relay = FakeSmtpRelay.start(starttls: certs)
+
+      capture_log(fn ->
+        assert :ok = SmtpProbe.test_connection(relay_config(relay, cacertfile: certs.cacertfile))
+      end)
+
+      assert_receive {:smtp_relay, {:tls_up, info}}
+      assert info.protocol == :"tlsv1.3"
+      assert info.session_id == ""
+    end
+
+    # The one failure the operator cannot diagnose from the alert alone: every
+    # other `:tls_alert` here means a rejected certificate, and the advice that
+    # goes with it sends them hunting for a CA bundle that is already correct.
+    test "names the missing middlebox record when the compatibility mode is on",
+         %{certs: certs} do
+      relay =
+        [starttls: certs] |> FakeSmtpRelay.start() |> FakeSmtpRelay.without_middlebox_record()
+
+      config = relay_config(relay, cacertfile: certs.cacertfile, middlebox_compat: true)
+
+      capture_log(fn ->
+        assert {:error, message} = SmtpProbe.test_connection(config)
+        assert message =~ "does not send the TLS 1.3 middlebox compatibility record"
+        assert message =~ "Unset SMTP_TLS_MIDDLEBOX_COMPAT"
+        refute message =~ "SMTP_CACERTFILE"
+      end)
+    end
   end
 
   describe "test_connection/1 — implicit TLS" do
@@ -140,7 +181,7 @@ defmodule Tymeslot.Mailer.SmtpProbeTest do
       config = relay_config(relay, ssl: true, cacertfile: certs.cacertfile)
 
       capture_log(fn -> assert :ok = SmtpProbe.test_connection(config) end)
-      assert_receive {:smtp_relay, :tls_up}
+      assert_receive {:smtp_relay, {:tls_up, _info}}
     end
 
     test "fails when no trust store validates the relay's certificate", %{certs: certs} do

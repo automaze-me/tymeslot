@@ -19,6 +19,7 @@ defmodule TymeslotWeb.Live.Scheduling.BookingUtmFlowTest do
   import Mox
   import Tymeslot.Factory
 
+  alias Tymeslot.BookingTestHelpers
   alias Tymeslot.Infrastructure.AvailabilityCache
   alias Tymeslot.Meetings.MeetingSchema
   alias Tymeslot.MeetingTypes.Slugs
@@ -192,9 +193,7 @@ defmodule TymeslotWeb.Live.Scheduling.BookingUtmFlowTest do
     target_date = Date.add(today, 1)
     date_str = Date.to_string(target_date)
 
-    if target_date.month != today.month || target_date.year != today.year do
-      view |> element("button[phx-click='next_month']") |> render_click()
-    end
+    BookingTestHelpers.show_month(view, target_date)
 
     wait_until(fn ->
       has_element?(view, "button.calendar-day[phx-value-date='#{date_str}']:not([disabled])")

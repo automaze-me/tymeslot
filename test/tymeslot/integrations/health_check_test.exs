@@ -12,6 +12,7 @@ defmodule Tymeslot.Integrations.HealthCheckTest do
   alias Tymeslot.Integrations.Calendar.CalendarIntegrationQueries
   alias Tymeslot.Integrations.Google.GoogleOAuthHelper
   alias Tymeslot.Integrations.HealthCheck
+  alias Tymeslot.Integrations.HealthCheck.IntegrationHealthStateQueries
   alias Tymeslot.Integrations.HealthCheck.ResponseHandler
   alias Tymeslot.Integrations.Shared.ReauthHandling
   alias Tymeslot.Repo
@@ -210,6 +211,24 @@ defmodule Tymeslot.Integrations.HealthCheckTest do
       assert status.failures == 0
       assert status.last_error_class == :transient
     end
+
+    test "treats a refused CalDAV password as hard" do
+      # The CalDAV-family providers used to answer a 401 with a sentence about
+      # app-specific passwords, which the classifier read as an unfamiliar
+      # string and recorded as transient. That left `consecutive_hard_failures`
+      # pinned at zero, so the fast auto-pause trigger could never fire and the
+      # server was probed for days after the credentials had stopped working.
+      user = insert(:user)
+      integration = apple_integration_refusing_credentials(user)
+
+      run_health_checks()
+      sync_with_server()
+
+      status = HealthCheck.get_health_status(:calendar, integration.id)
+      assert status.last_error_class == :hard
+      assert status.consecutive_hard_failures == 1
+      assert status.failures == 1
+    end
   end
 
   describe "attention_status/2" do
@@ -343,6 +362,99 @@ defmodule Tymeslot.Integrations.HealthCheckTest do
       end
     end
 
+    test "an integration already past the 48-hour threshold gets only the reauth email when its credentials are first refused" do
+      user = insert(:user)
+      integration = insert(:calendar_integration, user: user, is_active: true, provider: "google")
+
+      {:ok, _state} =
+        IntegrationHealthStateQueries.get_or_init(:calendar, integration.id, user.id)
+
+      {1, nil} =
+        IntegrationHealthStateQueries.update_fields(:calendar, integration.id,
+          status: "unhealthy",
+          failures: 3,
+          became_unhealthy_at: DateTime.add(DateTime.utc_now(), -49, :hour)
+        )
+
+      expect(GoogleCalendarAPIMock, :list_primary_events, 1, fn _int, _start, _end ->
+        {:error, :unauthorized, "Token has been expired or revoked"}
+      end)
+
+      run_health_checks()
+      sync_with_server()
+
+      assert CalendarIntegrationQueries.get(integration.id) |> elem(1) |> Map.get(:needs_reauth)
+
+      assert_enqueued(
+        worker: EmailWorker,
+        args: %{
+          "action" => "send_integration_reauth_notification",
+          "integration_id" => integration.id
+        }
+      )
+
+      refute_enqueued(
+        worker: EmailWorker,
+        args: %{"action" => "send_integration_unhealthy_notification"}
+      )
+    end
+
+    test "a refused CalDAV password flags needs_reauth and enqueues the email" do
+      user = insert(:user)
+      integration = apple_integration_refusing_credentials(user)
+
+      run_health_checks()
+      sync_with_server()
+
+      {:ok, updated} = CalendarIntegrationQueries.get(integration.id)
+      assert updated.needs_reauth == true
+
+      assert_enqueued(
+        worker: EmailWorker,
+        args: %{
+          "action" => "send_integration_reauth_notification",
+          "user_id" => user.id,
+          "integration_id" => integration.id,
+          "integration_type" => "calendar"
+        }
+      )
+    end
+
+    test "an integration past the 48-hour threshold still gets the unhealthy email for a transient failure" do
+      user = insert(:user)
+      integration = insert(:calendar_integration, user: user, is_active: true, provider: "google")
+
+      {:ok, _state} =
+        IntegrationHealthStateQueries.get_or_init(:calendar, integration.id, user.id)
+
+      {1, nil} =
+        IntegrationHealthStateQueries.update_fields(:calendar, integration.id,
+          status: "unhealthy",
+          failures: 3,
+          became_unhealthy_at: DateTime.add(DateTime.utc_now(), -49, :hour)
+        )
+
+      expect(GoogleCalendarAPIMock, :list_primary_events, 1, fn _int, _start, _end ->
+        {:error, :timeout}
+      end)
+
+      run_health_checks()
+      sync_with_server()
+
+      assert_enqueued(
+        worker: EmailWorker,
+        args: %{
+          "action" => "send_integration_unhealthy_notification",
+          "integration_id" => integration.id
+        }
+      )
+
+      refute_enqueued(
+        worker: EmailWorker,
+        args: %{"action" => "send_integration_reauth_notification"}
+      )
+    end
+
     test "transient errors do not trigger fast path" do
       user = insert(:user)
       integration = insert(:calendar_integration, user: user, is_active: true, provider: "google")
@@ -447,6 +559,24 @@ defmodule Tymeslot.Integrations.HealthCheckTest do
       result = HealthCheck.perform_single_check(:video, -1)
       assert result == :ok
     end
+  end
+
+  # An Apple integration whose stored app-specific password no longer works:
+  # every CalDAV request it makes is answered with a 401.
+  defp apple_integration_refusing_credentials(user) do
+    integration =
+      insert(:calendar_integration,
+        user: user,
+        is_active: true,
+        provider: "apple",
+        base_url: "https://caldav.icloud.com"
+      )
+
+    stub(Tymeslot.HTTPClientMock, :request, fn :propfind, _url, _body, _headers, _opts ->
+      {:ok, %Req.Response{status: 401, body: ""}}
+    end)
+
+    integration
   end
 
   defp run_health_checks do

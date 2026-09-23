@@ -10,6 +10,7 @@ defmodule Tymeslot.Factory do
   alias Tymeslot.Availability.AvailabilityBreakSchema
   alias Tymeslot.Availability.AvailabilityOverrideSchema
   alias Tymeslot.Availability.AvailabilityScheduleSchema
+  alias Tymeslot.Availability.TimeOffPeriodSchema
   alias Tymeslot.Availability.TravelPeriodDaySchema
   alias Tymeslot.Availability.TravelPeriodSchema
   alias Tymeslot.Availability.WeeklyAvailabilitySchema
@@ -279,6 +280,20 @@ defmodule Tymeslot.Factory do
       start_date: Date.add(Date.utc_today(), 30),
       end_date: Date.add(Date.utc_today(), 44),
       timezone: "Europe/Berlin",
+      profile: build(:profile)
+    }
+  end
+
+  @spec time_off_period_factory() :: Tymeslot.Availability.TimeOffPeriodSchema.t()
+  def time_off_period_factory do
+    starts_on = Date.add(Date.utc_today(), 7)
+
+    %TimeOffPeriodSchema{
+      starts_on: starts_on,
+      ends_on: Date.add(starts_on, 6),
+      start_time: nil,
+      end_time: nil,
+      label: "Holiday",
       profile: build(:profile)
     }
   end

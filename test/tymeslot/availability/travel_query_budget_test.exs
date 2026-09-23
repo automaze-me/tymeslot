@@ -18,9 +18,9 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
   import Tymeslot.Factory
 
   alias Tymeslot.Availability.Calculate
+  alias Tymeslot.Availability.Offer
   alias Tymeslot.Availability.Travel
   alias Tymeslot.Bookings.Policy
-  alias TymeslotWeb.Live.Scheduling.AvailabilityHelpers
   alias TymeslotWeb.Live.Scheduling.CalendarHelpers
 
   @home "America/New_York"
@@ -194,15 +194,7 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
       count =
         count_trip_queries(ctx.profile.id, fn ->
           {:ok, _availability} =
-            AvailabilityHelpers.get_range_availability(
-              ctx.user.id,
-              ctx.in_trip,
-              Date.add(ctx.in_trip, 20),
-              @home,
-              ctx.profile,
-              context(ctx),
-              30
-            )
+            Offer.days_in_range(request(ctx), ctx.in_trip, Date.add(ctx.in_trip, 20), 30)
         end)
 
       assert count == 1
@@ -226,14 +218,7 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
       [params] =
         trip_queries(ctx.profile.id, fn ->
           {:ok, _slots} =
-            AvailabilityHelpers.get_available_slots(
-              Date.to_iso8601(ctx.in_trip),
-              30,
-              @home,
-              ctx.user.id,
-              ctx.profile,
-              context(ctx)
-            )
+            Offer.slots_for_date(request(ctx), Date.to_iso8601(ctx.in_trip), 30)
         end)
 
       assert window(params) == {Date.add(ctx.in_trip, -1), Date.add(ctx.in_trip, 1)}
@@ -245,15 +230,7 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
       [params] =
         trip_queries(ctx.profile.id, fn ->
           {:ok, _availability} =
-            AvailabilityHelpers.get_range_availability(
-              ctx.user.id,
-              ctx.in_trip,
-              last_date,
-              @home,
-              ctx.profile,
-              context(ctx),
-              30
-            )
+            Offer.days_in_range(request(ctx), ctx.in_trip, last_date, 30)
         end)
 
       assert window(params) == {Date.add(ctx.in_trip, -1), Date.add(last_date, 1)}
@@ -326,11 +303,15 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
 
   # The calendar seam the flow already has for tests: a one-argument function
   # stands in for the provider, so this asks nothing of the calendar layer.
-  defp context(ctx) do
+  # `Tymeslot.Availability.Offer` took over the display path's slot and range
+  # call sites, so these tests drive it through its own request map rather than
+  # the old `AvailabilityHelpers` arguments.
+  defp request(ctx) do
     %{
-      demo_mode: false,
-      organizer_profile: ctx.profile,
+      profile: ctx.profile,
+      user_timezone: @home,
       meeting_type: ctx.meeting_type,
+      demo_mode?: false,
       debug_calendar_module: fn _organizer_user_id -> {:ok, []} end
     }
   end

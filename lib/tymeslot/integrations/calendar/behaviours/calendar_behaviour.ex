@@ -3,6 +3,7 @@ defmodule Tymeslot.Integrations.Calendar.CalendarBehaviour do
   Behaviour for calendar operations to enable testing with mocks.
   """
 
+  alias Tymeslot.Integrations.Calendar.CreatedEvent
   alias Tymeslot.Meetings.MeetingSchema
   alias Tymeslot.MeetingTypes.MeetingTypeSchema
 
@@ -16,7 +17,7 @@ defmodule Tymeslot.Integrations.Calendar.CalendarBehaviour do
               | {pos_integer(), pos_integer()}
               | nil
             ) ::
-              {:ok, any()} | {:error, any()}
+              {:ok, CreatedEvent.t()} | {:error, any()}
   @callback update_event(
               binary(),
               map(),
@@ -34,6 +35,16 @@ defmodule Tymeslot.Integrations.Calendar.CalendarBehaviour do
               | MeetingTypeSchema.t()
               | {pos_integer(), pos_integer()}
               | nil
+            ) ::
+              :ok | {:error, any()}
+  @callback delete_event(
+              binary(),
+              pos_integer()
+              | MeetingSchema.t()
+              | MeetingTypeSchema.t()
+              | {pos_integer(), pos_integer()}
+              | nil,
+              keyword()
             ) ::
               :ok | {:error, any()}
   @callback get_booking_integration_info(pos_integer() | MeetingTypeSchema.t()) ::

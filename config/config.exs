@@ -281,7 +281,7 @@ config :esbuild,
 
 # Configure tailwind
 config :tailwind,
-  version: "4.3.1",
+  version: "4.3.3",
   tymeslot: [
     args: ~w(
       --input=css/app.css
@@ -306,6 +306,42 @@ config :tailwind,
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
+
+# Parameter names whose values are replaced with "[FILTERED]" before Phoenix or
+# LiveView writes them to a log line. The match is a case-sensitive substring of
+# the parameter key, so "password" also covers "current_password" and
+# "new_password", "secret" covers "client_secret", and "token" covers
+# "access_token", "refresh_token" and "bot_token".
+#
+# Setting this replaces Phoenix's own default of ["password", "token"], so both
+# have to be repeated here. The additions are the credential names this app
+# posts that neither of those words reaches: "api_key" (MiroTalk and the
+# other key-authenticated video providers), "webhook_url" (a Slack incoming
+# webhook URL is itself the credential), and "custom_meeting_url" (a personal
+# meeting link routinely carries its own room key in a "?pwd=" parameter, so
+# the webhook reasoning applies to it unchanged).
+#
+# "value" is here for a different reason. A LiveView `phx-blur` push carries
+# the focused element's own value under that fixed key, whatever the field is
+# called, so a secret input that validates on blur sends its plaintext under
+# "value" rather than under its own name. The key is generic by construction
+# and cannot be narrowed, so it is filtered wholesale; nothing this app logs
+# needs to read it.
+#
+# This lives in compile-time config rather than runtime.exs so it holds at every
+# log level and in every environment. Production pins the level to :info, where
+# the "Parameters:" line is not emitted at all, but dev runs at :debug and a
+# deployment raising the level must not start logging whatever an organiser
+# typed into a connect form.
+config :phoenix, :filter_parameters, [
+  "password",
+  "secret",
+  "token",
+  "api_key",
+  "webhook_url",
+  "custom_meeting_url",
+  "value"
+]
 
 # Precompressed siblings written by `mix phx.digest`, replacing the stock
 # [Phoenix.Digester.Gzip]. Order is irrelevant here; what a client is offered
@@ -361,14 +397,23 @@ config :tymeslot, :video_providers, %{
   mirotalk: [enabled: true],
   google_meet: [enabled: true],
   teams: [enabled: true],
+  kmeet: [enabled: true],
+  jitsi: [enabled: true],
+  nextcloud_talk: [enabled: true],
   custom: [enabled: true]
 }
 
+# Days after a meeting ends before Tymeslot deletes its video room, for
+# providers whose rooms otherwise stay on the organiser's server (Nextcloud
+# Talk). Overridden by VIDEO_ROOM_RETENTION_DAYS in config/runtime.exs.
+config :tymeslot, :video_room_retention_days, 7
+
 # Whether this deployment's Zoom Marketplace app is configured for
-# `meeting:update:meeting`. Off by default: requesting a scope the app lacks is
-# silently dropped by Zoom, and would make Tymeslot ask users to reconnect for a
-# scope no reconnect can produce. See `ZoomProvider.Scopes`.
-config :tymeslot, :zoom_update_scope_enabled, false
+# `meeting:update:meeting`. On by default; a deployment whose app lacks the
+# scope must turn it off, because Zoom silently drops a scope the app lacks and
+# Tymeslot would ask users to reconnect for a scope no reconnect can produce.
+# See `ZoomProvider.Scopes`.
+config :tymeslot, :zoom_update_scope_enabled, true
 
 config :tymeslot, :calendar_providers, %{
   caldav: [enabled: true],

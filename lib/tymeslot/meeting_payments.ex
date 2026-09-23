@@ -32,6 +32,7 @@ defmodule Tymeslot.MeetingPayments do
 
   alias Tymeslot.MeetingPayments.BookingPaymentQueries
   alias Tymeslot.MeetingPayments.BookingPaymentSchema
+  alias Tymeslot.MeetingPayments.CheckoutOutcome
   alias Tymeslot.MeetingPayments.CheckoutSessions
   alias Tymeslot.MeetingPayments.ConnectAccountQueries
   alias Tymeslot.MeetingPayments.ConnectAccounts
@@ -48,6 +49,23 @@ defmodule Tymeslot.MeetingPayments do
 
   @type account :: ConnectAccountSchema.t()
   @type booking_payment :: BookingPaymentSchema.t()
+
+  @typedoc """
+  How many refunds a host still owes, and how much of each currency.
+  """
+  @type outstanding_refunds_summary :: %{
+          count: non_neg_integer(),
+          totals: [%{currency: String.t(), amount_cents: non_neg_integer()}]
+        }
+
+  @typedoc """
+  What a disconnect walked away from: the pending bookings it cancelled, and
+  the refunds the host is still holding and can no longer issue from Tymeslot.
+  """
+  @type disconnect_result :: %{
+          cancelled_count: non_neg_integer(),
+          outstanding_refunds_count: non_neg_integer()
+        }
 
   # ---------------------------------------------------------------------------
   # Connect account lifecycle
@@ -67,7 +85,7 @@ defmodule Tymeslot.MeetingPayments do
   Soft-deletes the host's Stripe Connect account row.
   """
   @spec disconnect(user :: %{id: integer()}) ::
-          {:ok, %{cancelled_count: non_neg_integer()}} | {:error, term()}
+          {:ok, disconnect_result()} | {:error, term()}
   defdelegate disconnect(user), to: ConnectAccounts
 
   @doc """
@@ -176,6 +194,30 @@ defmodule Tymeslot.MeetingPayments do
     do: BookingPaymentQueries.for_host(host_user_id, opts)
 
   @doc """
+  Lists the host's cancelled bookings that still hold the attendee's money,
+  oldest cancellation first.
+
+  Not bounded by `list_payments_for_host/2`'s recent-payments window, so an
+  older unrefunded cancellation stays visible instead of scrolling out of
+  sight.
+  """
+  @spec list_outstanding_refunds_for_host(integer(), keyword()) :: [booking_payment()]
+  def list_outstanding_refunds_for_host(host_user_id, opts \\ []),
+    do: BookingPaymentQueries.outstanding_refunds_for_host(host_user_id, opts)
+
+  @doc """
+  Summarises the host's outstanding refunds: how many there are, and how much
+  is owed in each currency.
+
+  Unbounded, unlike `list_outstanding_refunds_for_host/2`, so a caller can say
+  "showing 50 of 63" instead of truncating in silence, and so the disconnect
+  confirmation can name what the host is about to walk away from.
+  """
+  @spec outstanding_refunds_summary_for_host(integer()) :: outstanding_refunds_summary()
+  def outstanding_refunds_summary_for_host(host_user_id),
+    do: BookingPaymentQueries.outstanding_refunds_summary_for_host(host_user_id)
+
+  @doc """
   Returns the total count of pending booking payments for a host.
 
   Unlike `list_payments_for_host/2`, this is not bounded by any pagination
@@ -198,15 +240,48 @@ defmodule Tymeslot.MeetingPayments do
 
   @doc """
   Fetches a booking payment by ID, or `nil` if not found.
+
+  Unscoped: for workers and system rules only. A lookup driven by a signed-in
+  user must use `get_payment_for_host/2`.
   """
   @spec get_payment(Ecto.UUID.t()) :: booking_payment() | nil
   def get_payment(id), do: BookingPaymentQueries.get(id)
 
   @doc """
+  Fetches a booking payment by ID only if `host_user_id` took it.
+
+  Another host's payment, an unknown id and a malformed id all return
+  `{:error, :not_found}`, so the answer discloses nothing about payments the
+  caller does not own.
+  """
+  @spec get_payment_for_host(term(), integer()) ::
+          {:ok, booking_payment()} | {:error, :not_found}
+  def get_payment_for_host(id, host_user_id) do
+    case BookingPaymentQueries.get_for_host(id, host_user_id) do
+      nil -> {:error, :not_found}
+      payment -> {:ok, payment}
+    end
+  end
+
+  @doc """
   Fetches the booking payment for a given meeting, or `nil`.
+
+  Unscoped: for system rules only. A lookup on behalf of a signed-in user must
+  use `payment_for_meeting/2`.
   """
   @spec payment_for_meeting(Ecto.UUID.t()) :: booking_payment() | nil
   def payment_for_meeting(meeting_id), do: BookingPaymentQueries.by_meeting_id(meeting_id)
+
+  @doc """
+  Fetches the booking payment for a meeting only if `host_user_id` took it,
+  or `nil`.
+
+  Someone else who can see the meeting (its attendee, for instance) gets `nil`,
+  exactly as for an unpaid meeting: the payment is the host's business.
+  """
+  @spec payment_for_meeting(term(), integer()) :: booking_payment() | nil
+  def payment_for_meeting(meeting_id, host_user_id),
+    do: BookingPaymentQueries.by_meeting_id_for_host(meeting_id, host_user_id)
 
   @doc """
   Returns the remaining refundable balance in cents for a booking payment.
@@ -217,11 +292,18 @@ defmodule Tymeslot.MeetingPayments do
   defdelegate refundable_remaining_cents(payment), to: Refunds
 
   @doc """
-  Returns `true` when the payment is in a refundable status and was paid
+  Returns `true` when the payment still owes the attendee money and was paid
   within the 60-day refund window.
   """
-  @spec refundable?(booking_payment()) :: boolean()
+  @spec refundable?(booking_payment() | nil) :: boolean()
   defdelegate refundable?(payment), to: Refunds
+
+  @doc """
+  Returns `true` when the host still holds money the attendee has not been
+  given back, regardless of whether the 60-day window has passed.
+  """
+  @spec refund_outstanding?(booking_payment() | nil) :: boolean()
+  defdelegate refund_outstanding?(payment), to: Refunds
 
   @doc """
   Parses raw refund-form params into a validated `{:ok, pos_integer()}` or
@@ -235,11 +317,28 @@ defmodule Tymeslot.MeetingPayments do
   defdelegate parse_refund_amount(payment, params), to: Refunds
 
   @doc """
-  Issues a full or partial refund for a booking payment.
+  Issues a full or partial refund for a booking payment, whoever took it.
+
+  Unscoped: for system rules that refund with no acting user, such as
+  releasing the payment for a request that was never approved. A refund a
+  signed-in user asks for must go through `refund_payment_for_host/4`.
   """
   @spec issue_refund(booking_payment(), pos_integer(), String.t() | nil) ::
           {:ok, booking_payment()} | {:error, Refunds.refund_error()}
   defdelegate issue_refund(payment, amount_cents, reason \\ nil), to: Refunds
+
+  @doc """
+  Refunds a booking payment on behalf of the host who took it.
+
+  Only that host may refund it. Ownership is decided under the payment's row
+  lock, in the same transaction as the refund itself. Another host's payment,
+  an unknown id and a malformed id all return `{:error, :not_found}`.
+  """
+  @spec refund_payment_for_host(term(), integer(), pos_integer(), String.t() | nil) ::
+          {:ok, booking_payment()} | {:error, :not_found | Refunds.refund_error()}
+  defdelegate refund_payment_for_host(payment_id, host_user_id, amount_cents, reason \\ nil),
+    to: Refunds,
+    as: :issue_host_refund
 
   # ---------------------------------------------------------------------------
   # Checkout
@@ -256,6 +355,15 @@ defmodule Tymeslot.MeetingPayments do
     to: CheckoutSessions,
     as: :create_session_for_booking
 
+  @doc """
+  What an attendee returning from Stripe Checkout should be told about their
+  booking: still `:processing`, `:failed`, `:awaiting_approval`, `:declined`,
+  `:expired`, `:confirmed` or `:cancelled`. See `CheckoutOutcome` for the rules.
+  """
+  @spec checkout_outcome(booking_payment() | nil, Tymeslot.Meetings.MeetingSchema.t() | nil) ::
+          CheckoutOutcome.t()
+  defdelegate checkout_outcome(payment, meeting), to: CheckoutOutcome, as: :classify
+
   # ---------------------------------------------------------------------------
   # Currency
   # ---------------------------------------------------------------------------
@@ -265,6 +373,26 @@ defmodule Tymeslot.MeetingPayments do
   """
   @spec currency_allowlist() :: [String.t()]
   defdelegate currency_allowlist(), to: Currency, as: :allowlist
+
+  @doc """
+  Returns the host's pricing currency: the default currency of their live
+  (non-deleted) Connect account, or the fallback currency when there is no
+  such account, the account carries no currency yet, or there is no user.
+
+  Checkout charges the account's currency directly and never reaches the
+  fallback, since it requires a live account with charges enabled; the
+  fallback only labels prices and minimums shown to a host who cannot
+  currently take payments.
+  """
+  @spec host_currency(integer() | nil) :: String.t()
+  def host_currency(nil), do: Currency.fallback()
+
+  def host_currency(user_id) do
+    case ConnectAccountQueries.live_for_user(user_id) do
+      %{default_currency: currency} when is_binary(currency) and currency != "" -> currency
+      _no_currency -> Currency.fallback()
+    end
+  end
 
   @doc """
   Returns `true` if the given currency code is in the supported allowlist.
