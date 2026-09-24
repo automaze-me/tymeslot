@@ -16,51 +16,66 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelSection do
   @spec travel_section(map()) :: Phoenix.LiveView.Rendered.t()
   def travel_section(assigns) do
     ~H"""
-    <section class="space-y-4">
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <h3 class="text-token-base font-semibold text-tymeslot-800">
-            {dgettext("dashboard_availability", "Travel")}
-          </h3>
-          <p class="text-token-sm text-tymeslot-500">
-            {dgettext(
-              "dashboard_availability",
-              "Dates when you are in another timezone, with the hours you are bookable there."
-            )}
-          </p>
-        </div>
+    <div class="card-glass shadow-2xl shadow-tymeslot-200/50">
+      <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
+        <.section_header
+          level={2}
+          icon="hero-globe-alt"
+          title={dgettext("dashboard_availability", "Travel")}
+        />
 
-        <button
-          type="button"
-          class="btn btn-secondary shrink-0"
+        <.action_button
+          variant={:secondary}
           phx-click="show_travel_form"
           phx-target={@myself}
+          data-testid="add-travel-period"
         >
+          <.icon name="hero-plus" class="w-4 h-4" />
           {dgettext("dashboard_availability", "Add a trip")}
-        </button>
+        </.action_button>
       </div>
 
-      <p :if={@periods == []} class="text-token-sm text-tymeslot-400">
-        {dgettext("dashboard_availability", "No trips yet.")}
+      <p class="mb-8 text-token-sm text-tymeslot-500 font-bold">
+        {dgettext(
+          "dashboard_availability",
+          "Dates when you are in another timezone, with the hours you are bookable there."
+        )}
       </p>
 
-      <ul :if={@periods != []} class="space-y-2">
+      <.empty_state
+        :if={@periods == []}
+        message={dgettext("dashboard_availability", "No trips yet.")}
+        secondary_message={
+          dgettext(
+            "dashboard_availability",
+            "Add a trip and the days it covers are offered in that timezone, on the hours you keep there."
+          )
+        }
+      >
+        <:icon>
+          <.icon name="hero-globe-alt" class="w-8 h-8 text-tymeslot-300" />
+        </:icon>
+      </.empty_state>
+
+      <ul :if={@periods != []} class="space-y-3" data-testid="travel-list">
         <li
           :for={period <- @periods}
-          class="flex items-center justify-between gap-4 rounded-token-lg border-2 border-tymeslot-50 bg-white p-3"
+          class="flex flex-wrap items-center justify-between gap-3 rounded-token-xl border border-tymeslot-100 bg-tymeslot-50 px-4 py-3"
         >
           <div class="min-w-0">
-            <p class="truncate text-token-sm font-semibold text-tymeslot-800">{period.label}</p>
-            <p class="text-token-xs text-tymeslot-500">
+            <p class="font-bold text-tymeslot-700">
               {Calendar.strftime(period.start_date, "%d %b %Y")} – {Calendar.strftime(
                 period.end_date,
                 "%d %b %Y"
-              )} · {period.timezone}
+              )}
+            </p>
+            <p class="truncate text-token-sm text-tymeslot-500 font-medium">
+              {period.label} · {period.timezone}
             </p>
             <%!-- A trip with no available weekday leaves the host silently
             unbookable for its whole span, so that state is called out here
             rather than only inside the edit form. --%>
-            <p :if={no_bookable_hours?(period)} class="text-token-xs font-semibold text-red-600">
+            <p :if={no_bookable_hours?(period)} class="text-token-sm font-bold text-red-600">
               {dgettext(
                 "dashboard_availability",
                 "No bookable hours set. You are unavailable for this trip's entire span."
@@ -68,29 +83,31 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelSection do
             </p>
           </div>
 
-          <div class="flex shrink-0 items-center gap-2">
+          <div class="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              class="btn btn-ghost"
               phx-click="show_travel_form"
               phx-value-id={period.id}
               phx-target={@myself}
+              class="flex items-center justify-center h-9 w-9 bg-white text-tymeslot-700 rounded-token-lg border-2 border-tymeslot-100 hover:bg-tymeslot-100 transition-all shadow-sm shadow-tymeslot-500/5"
+              aria-label={dgettext("dashboard_availability", "Edit trip")}
             >
-              {dgettext("dashboard_availability", "Edit")}
+              <.icon name="hero-pencil-square" class="w-5 h-5" />
             </button>
             <button
               type="button"
-              class="btn btn-ghost"
               phx-click="show_delete_travel_modal"
               phx-value-id={period.id}
               phx-target={@myself}
+              class="flex items-center justify-center h-9 w-9 text-tymeslot-500 hover:text-red-500 hover:bg-red-50 rounded-token-lg border-2 border-transparent hover:border-red-100 transition-all"
+              aria-label={dgettext("dashboard_availability", "Delete trip")}
             >
-              {dgettext("dashboard_availability", "Delete")}
+              <.icon name="hero-trash" class="w-5 h-5" />
             </button>
           </div>
         </li>
       </ul>
-    </section>
+    </div>
     """
   end
 

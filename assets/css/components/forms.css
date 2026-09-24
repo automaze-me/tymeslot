@@ -13,6 +13,15 @@
   appearance: none;
 }
 
+/* Time fields are fixed-width controls: the content is always the same five or
+   six characters, so stretching one to the row width buys nothing. Worse, a
+   from/to pair then cannot share a line — each control and the dash between
+   them wrap onto their own row, which is how a seven-day editor grew three
+   times taller than it needed to be. */
+.input--time {
+  @apply w-auto shrink-0;
+}
+
 /* Input with leading icon - accounts for icon space */
 .input.input-with-icon {
   padding-left: 3.5rem; /* 1rem (icon left offset) + 1.25rem (icon width) + 1.25rem (gap) = 3.5rem */

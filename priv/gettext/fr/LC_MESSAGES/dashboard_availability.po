@@ -74,8 +74,8 @@ msgstr "Pause supprimée"
 #: lib/tymeslot_web/components/dashboard/availability/clear_day_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_break_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_schedule_modal.ex
-#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/delete_time_off_modal.ex
+#: lib/tymeslot_web/components/dashboard/availability/delete_travel_period_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/schedule_form_modal.ex
 #: lib/tymeslot_web/components/dashboard/availability/time_off_form_modal.ex
 #: lib/tymeslot_web/live/dashboard/availability/day_card_component.ex
@@ -367,7 +367,6 @@ msgid "Default schedule updated"
 msgstr "Planning par défaut mis à jour"
 
 #: lib/tymeslot_web/live/dashboard/availability/schedule_switcher.ex
-#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr "Supprimer"
@@ -454,8 +453,8 @@ msgid "Rename schedule"
 msgstr "Renommer le planning"
 
 #: lib/tymeslot_web/components/dashboard/availability/schedule_form_modal.ex
-#: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
 #: lib/tymeslot_web/components/dashboard/availability/time_off_form_modal.ex
+#: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
 #, elixir-autogen, elixir-format
 msgid "Save"
 msgstr "Enregistrer"
@@ -465,7 +464,7 @@ msgstr "Enregistrer"
 msgid "Schedule created"
 msgstr "Planning créé"
 
-#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#: lib/tymeslot_web/live/dashboard/availability/delete_modal_handler.ex
 #, elixir-autogen, elixir-format
 msgid "Schedule deleted"
 msgstr "Planning supprimé"
@@ -490,7 +489,7 @@ msgstr "Planning renommé"
 msgid "Scheduling Preferences"
 msgstr "Préférences de planification"
 
-#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#: lib/tymeslot_web/live/dashboard/availability/schedule_failure_message.ex
 #, elixir-autogen, elixir-format
 msgid "Something went wrong. Please try again."
 msgstr "Une erreur est survenue. Veuillez réessayer."
@@ -510,7 +509,7 @@ msgstr "Ces règles s'appliquent à chaque type de réunion utilisant ce plannin
 msgid "Time to block after each appointment for preparation, travel, or breaks."
 msgstr "Temps à bloquer après chaque rendez-vous pour la préparation, les déplacements ou les pauses."
 
-#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#: lib/tymeslot_web/live/dashboard/availability/delete_modal_handler.ex
 #, elixir-autogen, elixir-format
 msgid "Your default schedule cannot be deleted. Make another schedule the default first."
 msgstr "Votre planning par défaut ne peut pas être supprimé. Définissez d'abord un autre planning par défaut."
@@ -556,8 +555,8 @@ msgstr "La pause doit commencer pendant les heures de travail de ce jour"
 msgid "This break overlaps an existing break"
 msgstr "Cette pause chevauche une pause existante"
 
+#: lib/tymeslot_web/live/dashboard/availability/schedule_failure_message.ex
 #: lib/tymeslot_web/live/dashboard/availability/schedule_switcher.ex
-#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "You have reached the limit of %{count} schedules. Delete one to add another."
 msgstr ""
@@ -646,11 +645,6 @@ msgstr "Supprimer le voyage"
 
 #: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
 #, elixir-autogen, elixir-format
-msgid "Edit"
-msgstr "Modifier"
-
-#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
-#, elixir-autogen, elixir-format
 msgid "No trips yet."
 msgstr "Aucun voyage pour le moment."
 
@@ -659,7 +653,7 @@ msgstr "Aucun voyage pour le moment."
 msgid "Travel"
 msgstr "Voyages"
 
-#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#: lib/tymeslot_web/live/dashboard/availability/delete_modal_handler.ex
 #, elixir-autogen, elixir-format
 msgid "Trip deleted"
 msgstr "Voyage supprimé"
@@ -670,6 +664,7 @@ msgid "Bookable hours during this trip"
 msgstr "Horaires réservables pendant ce voyage"
 
 #: lib/tymeslot_web/live/dashboard/availability/travel_form.ex
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
 #, elixir-autogen, elixir-format
 msgid "Edit trip"
 msgstr "Modifier le voyage"
@@ -694,15 +689,16 @@ msgstr "Aucun horaire réservable défini. Vous êtes indisponible pendant toute
 msgid "Start date"
 msgstr "Date de début"
 
-#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#: lib/tymeslot_web/live/dashboard/availability/travel_form_handler.ex
 #, elixir-autogen, elixir-format
 msgid "Trip saved"
 msgstr "Voyage enregistré"
 
-#: lib/tymeslot_web/live/dashboard/schedule_settings_component.ex
+#: lib/tymeslot_web/live/dashboard/availability/travel_form_handler.ex
 #, elixir-autogen, elixir-format
 msgid "Unknown timezone"
 msgstr "Fuseau horaire inconnu"
+
 #: lib/tymeslot_web/live/dashboard/availability/time_off_card.ex
 #, elixir-autogen, elixir-format
 msgid "%{from} to %{to}"
@@ -906,3 +902,13 @@ msgid "and 1 more"
 msgid_plural "and %{count} more"
 msgstr[0] "et 1 autre"
 msgstr[1] "et %{count} autres"
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Add a trip and the days it covers are offered in that timezone, on the hours you keep there."
+msgstr "Ajoutez un voyage et les jours qu'il couvre seront proposés dans ce fuseau horaire, aux horaires où vous y êtes disponible à la réservation."
+
+#: lib/tymeslot_web/live/dashboard/availability/travel_section.ex
+#, elixir-autogen, elixir-format
+msgid "Delete trip"
+msgstr "Supprimer le voyage"

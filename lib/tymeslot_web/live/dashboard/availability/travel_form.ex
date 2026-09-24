@@ -141,14 +141,14 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
               type="time"
               name={"days[#{day_of_week}][start_time]"}
               value={day_field(@values, day_of_week, :start_time)}
-              class="input"
+              class="input input--time"
             />
             <span class="text-tymeslot-400">–</span>
             <input
               type="time"
               name={"days[#{day_of_week}][end_time]"}
               value={day_field(@values, day_of_week, :end_time)}
-              class="input"
+              class="input input--time"
             />
           </div>
         </fieldset>
