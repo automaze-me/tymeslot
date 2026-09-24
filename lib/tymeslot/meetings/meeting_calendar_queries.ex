@@ -66,11 +66,14 @@ defmodule Tymeslot.Meetings.MeetingCalendarQueries do
         %{}
 
       ids ->
+        calendar_backed = CalendarEventLink.calendar_backed_video_providers()
+
         Meeting
         |> where(
           [m],
           m.calendar_integration_id == ^calendar_integration_id and
-            (m.provider_event_id in ^ids or m.uid in ^ids)
+            (m.provider_event_id in ^ids or m.uid in ^ids or
+               (m.video_provider in ^calendar_backed and m.video_room_id in ^ids))
         )
         |> Repo.all()
         |> Enum.flat_map(fn meeting ->
@@ -93,6 +96,35 @@ defmodule Tymeslot.Meetings.MeetingCalendarQueries do
       |> where(
         [m],
         m.calendar_integration_id == ^calendar_integration_id and m.uid == ^uid
+      )
+      |> limit(1)
+      |> Repo.one()
+
+    case result do
+      nil -> {:error, :not_found}
+      meeting -> {:ok, meeting}
+    end
+  end
+
+  @doc """
+  Finds a meeting by the video room ID of a calendar-backed video provider.
+
+  Only meetings whose room is itself a calendar event are eligible, so a room
+  handle from a provider the calendar has never heard of cannot match.
+
+  Returns `{:ok, meeting}` if found, `{:error, :not_found}` otherwise.
+  """
+  @spec get_by_calendar_backed_room_id(integer(), String.t()) ::
+          {:ok, Meeting.t()} | {:error, :not_found}
+  def get_by_calendar_backed_room_id(calendar_integration_id, room_id) do
+    calendar_backed = CalendarEventLink.calendar_backed_video_providers()
+
+    result =
+      Meeting
+      |> where(
+        [m],
+        m.calendar_integration_id == ^calendar_integration_id and
+          m.video_provider in ^calendar_backed and m.video_room_id == ^room_id
       )
       |> limit(1)
       |> Repo.one()

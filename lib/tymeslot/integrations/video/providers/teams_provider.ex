@@ -437,16 +437,27 @@ defmodule Tymeslot.Integrations.Video.Providers.TeamsProvider do
     )
   end
 
+  # A Teams room is a calendar event, so it has to describe the booking it was
+  # created for. The booking arrives under `:event_details`, the same carrier
+  # Zoom and Nextcloud Talk read; the flat `:meeting_start_time` /
+  # `:meeting_end_time` keys stay ahead of it for callers that still pass them.
+  #
+  # The final fallback — an hour from now, for half an hour — only ever applies
+  # where a caller supplied neither, and it is wrong for any real booking: it
+  # writes a placeholder into the organiser's calendar at a time nothing was
+  # booked for, which reads as junk and invites them to delete it.
   defp get_meeting_times(config) do
+    details = Map.get(config, :event_details) || %{}
+
     start_time =
-      case Map.get(config, :meeting_start_time) do
+      case Map.get(config, :meeting_start_time) || Map.get(details, :start_time) do
         nil -> DateTime.add(DateTime.utc_now(), 3600, :second)
         dt when is_binary(dt) -> parse_iso8601!(dt)
         dt -> dt
       end
 
     end_time =
-      case Map.get(config, :meeting_end_time) do
+      case Map.get(config, :meeting_end_time) || Map.get(details, :end_time) do
         nil -> DateTime.add(start_time, 1800, :second)
         dt when is_binary(dt) -> parse_iso8601!(dt)
         dt -> dt
@@ -461,8 +472,11 @@ defmodule Tymeslot.Integrations.Video.Providers.TeamsProvider do
   end
 
   defp build_meeting_payload(start_time, end_time, config) do
+    details = Map.get(config, :event_details) || %{}
+
     payload = %{
-      subject: Map.get(config, :meeting_topic, "Scheduled Meeting"),
+      subject:
+        Map.get(config, :meeting_topic) || Map.get(details, :summary) || "Scheduled Meeting",
       start: %{dateTime: DateTime.to_iso8601(start_time), timeZone: "UTC"},
       end: %{dateTime: DateTime.to_iso8601(end_time), timeZone: "UTC"},
       isOnlineMeeting: true

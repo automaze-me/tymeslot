@@ -366,15 +366,15 @@ defmodule Tymeslot.Meetings.VideoRooms do
         video_room_expires_at: expiry_time
       }
 
-      # If the video provider is Teams and we got a room_id (which is the Microsoft Event ID),
-      # update the meeting UID so subsequent calendar syncs target this same event.
-      attrs =
-        if meeting_context.provider_type == :teams and room_id do
-          Map.put(attrs, :uid, room_id)
-        else
-          attrs
-        end
-
+      # A Teams room is provisioned as its own calendar event, so `room_id` is a
+      # Microsoft event ID and not just an opaque room handle. That tempted an
+      # earlier version to copy it into `uid` so calendar syncs would target it.
+      # `uid` is not free to take: it is the public identifier in the meeting
+      # management routes, and `cancel_url`/`reschedule_url` were built from it
+      # at booking time and are already in the attendee's inbox by the time a
+      # room is attached. Overwriting it left every one of those links pointing
+      # at a row that can no longer be found. The event identity lives in
+      # `video_room_id`, which `CalendarEventLink` reads for Teams meetings.
       {:ok, attrs}
     end
   end
