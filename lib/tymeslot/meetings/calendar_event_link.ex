@@ -30,49 +30,18 @@ defmodule Tymeslot.Meetings.CalendarEventLink do
 
   @identity_fields [:provider_event_id, :uid]
 
-  # Microsoft Teams provisions a room by creating a calendar event of its own,
-  # so a meeting's `video_room_id` is an Outlook event ID in the same namespace
-  # as `provider_event_id` — and it is the only identifier by which the host's
-  # calendar knows that event. Every other video provider hands back a room
-  # handle that no calendar has ever heard of, so none of them may join the
-  # rule: a Zoom meeting ID matching a cached event would be a false link.
-  @calendar_backed_video_providers ["teams"]
-
   @doc """
   Returns the non-blank identifiers of a meeting or a calendar event.
 
   Accepts any struct or map carrying `:provider_event_id` and/or `:uid` —
   meetings, cached provider events, `CalendarEvent` structs, and the grid's
-  `BookingEvent` projections all qualify. A meeting whose video room is itself
-  a calendar event (see `@calendar_backed_video_providers`) also answers with
-  its `video_room_id`.
+  `BookingEvent` projections all qualify.
   """
   @spec identifiers(map()) :: [String.t()]
   def identifiers(record) when is_map(record) do
     @identity_fields
     |> Enum.map(&Map.get(record, &1))
-    |> Enum.concat([calendar_backed_room_id(record)])
     |> Enum.reject(&blank_identifier?/1)
-  end
-
-  @doc """
-  The `video_provider` values whose room is itself a calendar event.
-
-  Exposed so that a query filtering on columns rather than whole records —
-  which cannot call `identifiers/1` per row — applies the same rule.
-  """
-  @spec calendar_backed_video_providers() :: [String.t()]
-  def calendar_backed_video_providers, do: @calendar_backed_video_providers
-
-  @doc """
-  The video room ID of `record` when that room is a calendar event in its own
-  right, and `nil` otherwise.
-  """
-  @spec calendar_backed_room_id(map()) :: String.t() | nil
-  def calendar_backed_room_id(record) when is_map(record) do
-    if Map.get(record, :video_provider) in @calendar_backed_video_providers do
-      Map.get(record, :video_room_id)
-    end
   end
 
   @doc """

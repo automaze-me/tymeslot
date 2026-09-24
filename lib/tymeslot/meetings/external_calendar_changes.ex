@@ -98,11 +98,7 @@ defmodule Tymeslot.Meetings.ExternalCalendarChanges do
   Looks up a meeting linked to a calendar event by provider event ID or UID.
 
   Returns `{:ok, meeting}` if a linked meeting is found, `{:error, :not_found}`
-  otherwise. Tries `provider_event_id` first, falls back to `uid`, and finally
-  to the video room ID of a provider whose room is a calendar event in its own
-  right — a Teams room is created as an Outlook event, so an edit made to it in
-  the host's calendar arrives carrying that ID and nothing else the meeting
-  holds.
+  otherwise. Tries `provider_event_id` first, falls back to `uid`.
 
   The fallback runs when the first lookup *misses*, not merely when the ID is
   absent: a CalDAV event carries an href in `provider_event_id`, while the
@@ -115,9 +111,8 @@ defmodule Tymeslot.Meetings.ExternalCalendarChanges do
           {:ok, Meeting.t()} | {:error, :not_found}
   def find_linked_meeting(calendar_integration_id, provider_event_id, uid) do
     with {:error, :not_found} <-
-           by_provider_event_id(calendar_integration_id, provider_event_id),
-         {:error, :not_found} <- by_uid(calendar_integration_id, uid) do
-      by_calendar_backed_room_id(calendar_integration_id, provider_event_id)
+           by_provider_event_id(calendar_integration_id, provider_event_id) do
+      by_uid(calendar_integration_id, uid)
     end
   end
 
@@ -134,15 +129,6 @@ defmodule Tymeslot.Meetings.ExternalCalendarChanges do
 
   defp by_uid(calendar_integration_id, uid),
     do: MeetingCalendarQueries.get_by_uid_and_integration(calendar_integration_id, uid)
-
-  defp by_calendar_backed_room_id(_calendar_integration_id, nil), do: {:error, :not_found}
-
-  defp by_calendar_backed_room_id(calendar_integration_id, provider_event_id),
-    do:
-      MeetingCalendarQueries.get_by_calendar_backed_room_id(
-        calendar_integration_id,
-        provider_event_id
-      )
 
   @spec status_for(signal()) :: String.t()
   defp status_for(:deleted), do: @externally_deleted

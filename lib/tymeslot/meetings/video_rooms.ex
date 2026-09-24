@@ -373,8 +373,15 @@ defmodule Tymeslot.Meetings.VideoRooms do
       # management routes, and `cancel_url`/`reschedule_url` were built from it
       # at booking time and are already in the attendee's inbox by the time a
       # room is attached. Overwriting it left every one of those links pointing
-      # at a row that can no longer be found. The event identity lives in
-      # `video_room_id`, which `CalendarEventLink` reads for Teams meetings.
+      # at a row that can no longer be found, and made deleting that event read
+      # as the booking having been deleted externally.
+      #
+      # The room's own id stays in `video_room_id` and is deliberately *not*
+      # part of `CalendarEventLink`'s identity rule: the Teams event is not the
+      # booking's event, so an external change to it must not be applied to the
+      # booking. Removing that event means the video room is gone, which is not
+      # the booking being called off — see the tests in
+      # `Tymeslot.Meetings.ExternalCalendarChangesTeamsRoomTest`.
       {:ok, attrs}
     end
   end
