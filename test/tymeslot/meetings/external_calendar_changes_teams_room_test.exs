@@ -19,6 +19,9 @@ defmodule Tymeslot.Meetings.ExternalCalendarChangesTeamsRoomTest do
 
   import Tymeslot.Factory
 
+  @moduletag :meetings
+  @moduletag :video
+
   alias Tymeslot.Meetings
   alias Tymeslot.Meetings.MeetingQueries
 
