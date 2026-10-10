@@ -45,6 +45,8 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.BookingTextForm do
 
   alias Ecto.Changeset
   alias Phoenix.HTML.Form
+  alias Tymeslot.BookingPages
+  alias Tymeslot.BookingPages.BookingPageSchema
   alias Tymeslot.Profiles
   alias Tymeslot.Profiles.InputValidation
   alias Tymeslot.Profiles.ProfileSchema
@@ -388,9 +390,9 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.BookingTextForm do
   end
 
   defp save(socket, params) do
-    case Profiles.update_booking_text(socket.assigns.profile, params) do
+    case persist_booking_text(socket.assigns.profile, params) do
       {:ok, profile} ->
-        send(self(), {:profile_updated, profile})
+        notify_profile_updated(profile)
 
         socket
         |> assign(:profile, profile)
@@ -404,6 +406,37 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.BookingTextForm do
         reject(socket, changeset)
     end
   end
+
+  # On a booking page's tab this form holds the owner's profile as the page
+  # presents it, and the texts are the page's: they are written to the page,
+  # and the dashboard's own profile is neither written nor told.
+  defp persist_booking_text(%{booking_page: %BookingPageSchema{} = page} = profile, params) do
+    case BookingPages.update_booking_text(page, params) do
+      {:ok, page} ->
+        {:ok, BookingPages.apply_to_profile(profile, page)}
+
+      {:error, page_changeset} ->
+        {:error,
+         with_page_errors(ProfileSchema.booking_text_changeset(profile, params), page_changeset)}
+    end
+  end
+
+  defp persist_booking_text(profile, params), do: Profiles.update_booking_text(profile, params)
+
+  # The form renders a profile changeset. The page ran the same rules on the
+  # same params, so that changeset already holds the page's validation errors;
+  # anything only the page's write hit is carried over too, so a failed save
+  # never shows as an error-free form.
+  defp with_page_errors(changeset, page_changeset) do
+    (page_changeset.errors -- changeset.errors)
+    |> Enum.reduce(changeset, fn {field, {message, opts}}, acc ->
+      Changeset.add_error(acc, field, message, opts)
+    end)
+    |> Map.put(:action, page_changeset.action)
+  end
+
+  defp notify_profile_updated(%{booking_page: %BookingPageSchema{}}), do: :ok
+  defp notify_profile_updated(profile), do: send(self(), {:profile_updated, profile})
 
   # A field emptied on the way to retyping it is work in progress, not a
   # failure: autosave sees the blank as soon as the debounce fires, and
@@ -453,9 +486,11 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.BookingTextForm do
     |> Enum.map(fn {key, facts} -> {facts.name, key} end)
   end
 
-  defp preview_url(%{username: username, user_id: user_id}, token)
-       when is_binary(username) and is_integer(user_id) do
-    PreviewMode.owner_path(username, user_id) <> "&t=#{token}"
+  defp preview_url(%{user_id: user_id} = profile, token) when is_integer(user_id) do
+    case BookingPages.public_address(profile) do
+      address when is_binary(address) -> PreviewMode.owner_path(address, user_id) <> "&t=#{token}"
+      _no_address -> nil
+    end
   end
 
   defp preview_url(_profile, _token), do: nil
