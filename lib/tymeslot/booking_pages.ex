@@ -252,6 +252,37 @@ defmodule Tymeslot.BookingPages do
 
   defp stringify(attrs), do: Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
 
+  @doc """
+  `profile` as the page `meeting` was booked through presents it, while that
+  page exists; otherwise `profile` unchanged. Managing a booking (cancel,
+  reschedule) happens in the look the booking was made in, whichever address
+  the link came in on.
+  """
+  @spec for_meeting(ProfileSchema.t(), map()) :: ProfileSchema.t()
+  def for_meeting(%ProfileSchema{} = profile, %{booking_page_id: page_id})
+      when is_integer(page_id) do
+    case BookingPageQueries.get_for_profile(profile.id, page_id) do
+      nil -> profile
+      page -> apply_to_profile(profile, page)
+    end
+  end
+
+  def for_meeting(profile, _meeting), do: profile
+
+  @doc """
+  The address to send someone back to for `meeting`: its page's while the
+  page exists, otherwise `fallback` (the host's username).
+  """
+  @spec address_for_meeting(map(), String.t() | nil) :: String.t() | nil
+  def address_for_meeting(%{booking_page_id: page_id}, fallback) when is_integer(page_id) do
+    case BookingPageQueries.get(page_id) do
+      %BookingPageSchema{slug: slug} -> slug
+      nil -> fallback
+    end
+  end
+
+  def address_for_meeting(_meeting, fallback), do: fallback
+
   # The page's own current address is never a clash with itself. Otherwise
   # `Profiles.username_available?/1` answers for usernames and pages alike
   # (Task 4), case-insensitively; the unique index settles a race between
