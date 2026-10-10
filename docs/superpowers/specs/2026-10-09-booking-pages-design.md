@@ -112,6 +112,35 @@ page (direct link under the username, quick add, API).
 The migration changes no existing row's meaning: after it, `/<username>`
 shows exactly what it showed before and no extra pages exist.
 
+### Rollout and rollback
+
+Back up the database before deploying. The migration runs by itself when the
+new image starts: `start.sh` (Cloudron) and `start-docker.sh` (Docker) run
+every pending migration through `Ecto.Migrator` before Phoenix starts.
+
+Once any page exists, the code from before booking pages can no longer serve
+the host's own start page: it looks up a theme's colours with
+`Repo.get_by(profile_id:, theme_id:)`, and a page's colour rows carry the
+profile id too, so the lookup raises `Ecto.MultipleResultsError`. To go back
+to an image from before booking pages:
+
+1. Roll the migration down while the booking pages image is still deployed
+   (the older image does not contain it). Its down step deletes every page's
+   colour rows, removes both `booking_page_id` columns and drops
+   `booking_pages` and `booking_page_meeting_types`: all page data is lost,
+   while `/<username>`, its colours and its meeting types stay as they were.
+2. Deploy the older image straight away; the booking pages image would run
+   the migration up again on its next start.
+
+`Tymeslot.Release` has no rollback helper. Run Ecto's migrator through the
+release, in the same environment the start script migrates in:
+
+```bash
+bin/tymeslot eval 'Ecto.Migrator.with_repo(Tymeslot.Repo, &Ecto.Migrator.run(&1, :down, to: 20261009120000))'
+```
+
+`to:` is inclusive and also rolls back every migration added after this one.
+
 ## Address namespace
 
 A page address follows `UsernameValidator.validate/1` and is stored
