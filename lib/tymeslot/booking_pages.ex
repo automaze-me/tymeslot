@@ -269,11 +269,12 @@ defmodule Tymeslot.BookingPages do
 
   @doc """
   `profile` as the page `meeting` was booked through presents it, while that
-  page exists; otherwise `profile` unchanged. Managing a booking (cancel,
-  reschedule) happens in the look the booking was made in, whichever address
-  the link came in on.
+  page exists; otherwise `profile` unchanged (nil for a missing profile).
+  Managing a booking (cancel, reschedule) and returning from its payment
+  happen in the look the booking was made in, whichever address the link
+  came in on.
   """
-  @spec for_meeting(ProfileSchema.t(), map()) :: ProfileSchema.t()
+  @spec for_meeting(ProfileSchema.t() | nil, map()) :: ProfileSchema.t() | nil
   def for_meeting(%ProfileSchema{} = profile, %{booking_page_id: page_id})
       when is_integer(page_id) do
     case BookingPageQueries.get_for_profile(profile.id, page_id) do
