@@ -1,0 +1,159 @@
+defmodule Tymeslot.BookingPages do
+  @moduledoc """
+  Booking pages: extra public start pages of a profile, each at its own
+  top-level address with its own theme, colours, texts and meeting types.
+
+  The profile's own page at `/<username>` is not one of these; it stays on the
+  profile. An address shares one namespace with usernames and reserved paths,
+  so neither can take the other's.
+  """
+  alias Ecto.Changeset
+  alias Tymeslot.BookingPages.BookingPageQueries
+  alias Tymeslot.BookingPages.BookingPageSchema
+  alias Tymeslot.Profiles
+  alias Tymeslot.Profiles.ProfileSchema
+  alias Tymeslot.Repo
+  alias Tymeslot.ThemeCustomizations
+  alias Tymeslot.Themes.Catalog
+
+  @type page :: BookingPageSchema.t()
+
+  @max_pages 10
+
+  @doc "The most extra pages one profile may hold."
+  @spec max_pages() :: pos_integer()
+  def max_pages, do: @max_pages
+
+  @doc "A profile's pages, oldest first."
+  @spec list(integer()) :: [page()]
+  def list(profile_id), do: BookingPageQueries.list_for_profile(profile_id)
+
+  @doc """
+  One of a profile's pages. `id` may come straight from a URL or an event, so
+  a string that is not a whole number is simply not found.
+  """
+  @spec fetch(integer(), integer() | String.t()) :: {:ok, page()} | {:error, :not_found}
+  def fetch(profile_id, id) when is_binary(id) do
+    case Integer.parse(id) do
+      {int, ""} -> fetch(profile_id, int)
+      _not_an_id -> {:error, :not_found}
+    end
+  end
+
+  def fetch(profile_id, id) when is_integer(id) do
+    case BookingPageQueries.get_for_profile(profile_id, id) do
+      nil -> {:error, :not_found}
+      page -> {:ok, page}
+    end
+  end
+
+  @doc """
+  The new-page form's changeset, address namespace included, for showing
+  errors while the host types.
+  """
+  @spec change_new(ProfileSchema.t(), map()) :: Changeset.t()
+  def change_new(%ProfileSchema{} = profile, attrs) do
+    profile
+    |> new_changeset(attrs)
+    |> Map.put(:action, :validate)
+  end
+
+  @doc """
+  Creates a page for `profile` on the profile's current theme, with copies of
+  its colours (`ThemeCustomizations.copy_to_page/2`). Texts start switched off
+  and no meeting types are listed.
+  """
+  @spec create(ProfileSchema.t(), map()) ::
+          {:ok, page()} | {:error, :limit_reached} | {:error, Changeset.t()}
+  def create(%ProfileSchema{} = profile, attrs) do
+    if BookingPageQueries.count_for_profile(profile.id) >= @max_pages do
+      {:error, :limit_reached}
+    else
+      Repo.transaction(fn ->
+        with {:ok, page} <- profile |> new_changeset(attrs) |> BookingPageQueries.insert(),
+             :ok <- ThemeCustomizations.copy_to_page(profile.id, page.id) do
+          page
+        else
+          {:error, error} -> Repo.rollback(error)
+        end
+      end)
+    end
+  end
+
+  @doc "The details form's changeset, address namespace included."
+  @spec change_details(page(), map()) :: Changeset.t()
+  def change_details(%BookingPageSchema{} = page, attrs) do
+    page
+    |> BookingPageSchema.details_changeset(attrs)
+    |> validate_address_free(page.slug)
+    |> Map.put(:action, :validate)
+  end
+
+  @doc "Renames a page or moves it to another address."
+  @spec update_details(page(), map()) :: {:ok, page()} | {:error, Changeset.t()}
+  def update_details(%BookingPageSchema{} = page, attrs) do
+    page
+    |> BookingPageSchema.details_changeset(attrs)
+    |> validate_address_free(page.slug)
+    |> BookingPageQueries.update()
+  end
+
+  @doc "Switches a page to another theme."
+  @spec update_theme(page(), String.t()) :: {:ok, page()} | {:error, Changeset.t()}
+  def update_theme(%BookingPageSchema{} = page, theme_id) do
+    page
+    |> BookingPageSchema.theme_changeset(theme_id)
+    |> BookingPageQueries.update()
+  end
+
+  @doc """
+  Saves a page's booking texts, under the rules the profile's own follow
+  (`ProfileSchema.booking_text_changeset/2`).
+  """
+  @spec update_booking_text(page(), map()) :: {:ok, page()} | {:error, Changeset.t()}
+  def update_booking_text(%BookingPageSchema{} = page, attrs) do
+    page
+    |> ProfileSchema.booking_text_changeset(attrs)
+    |> BookingPageQueries.update()
+  end
+
+  @doc """
+  Deletes a page. Its colours go first, through `ThemeCustomizations`, so
+  their uploaded background files are removed too; the database would drop the
+  rows on its own but leave the files behind. Its meeting type listings go
+  with the page, and its bookings keep everything but the page id.
+  """
+  @spec delete(page()) :: {:ok, page()} | {:error, term()}
+  def delete(%BookingPageSchema{} = page) do
+    with :ok <- ThemeCustomizations.delete_page_customizations(page.id) do
+      BookingPageQueries.delete(page)
+    end
+  end
+
+  defp new_changeset(profile, attrs) do
+    %BookingPageSchema{}
+    |> BookingPageSchema.create_changeset(
+      Map.merge(stringify(attrs), %{
+        "profile_id" => profile.id,
+        "booking_theme" => profile.booking_theme || Catalog.default_id()
+      })
+    )
+    |> validate_address_free(nil)
+  end
+
+  defp stringify(attrs), do: Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+
+  # The page's own current address is never a clash with itself. Otherwise
+  # `Profiles.username_available?/1` answers for usernames and pages alike
+  # (Task 4), case-insensitively; the unique index settles a race between
+  # pages, and resolution lets a username win a race against a page.
+  defp validate_address_free(changeset, current_slug) do
+    Changeset.validate_change(changeset, :slug, fn :slug, slug ->
+      cond do
+        slug == current_slug -> []
+        Profiles.username_available?(slug) -> []
+        true -> [slug: {"has already been taken", validation: :unsafe_unique}]
+      end
+    end)
+  end
+end
