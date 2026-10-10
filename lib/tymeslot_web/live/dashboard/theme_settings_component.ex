@@ -18,6 +18,8 @@ defmodule TymeslotWeb.Dashboard.ThemeSettingsComponent do
   alias Tymeslot.Profiles
   alias Tymeslot.Scheduling.LinkAccessPolicy
   alias TymeslotWeb.Dashboard.ThemeSettings.BookingTextForm
+  alias TymeslotWeb.Dashboard.ThemeSettings.PagesComponent
+  alias TymeslotWeb.Dashboard.ThemeSettings.PageSettingsComponent
   alias TymeslotWeb.Dashboard.ThemeSettings.ThemeCustomizationComponent
   alias TymeslotWeb.Dashboard.ThemeSettings.ThemePreview
   alias TymeslotWeb.Live.Scheduling.PreviewMode
@@ -84,6 +86,14 @@ defmodule TymeslotWeb.Dashboard.ThemeSettingsComponent do
             />
           </div>
         <% else %>
+          <.live_component
+            module={PagesComponent}
+            id="booking-pages"
+            profile={@profile}
+            pages={@pages}
+            selected_page={@selected_page}
+          />
+
           <div class="mb-16 max-w-2xl">
             <p class="text-xl text-tymeslot-500 font-medium leading-relaxed">
               {dgettext(
@@ -199,6 +209,13 @@ defmodule TymeslotWeb.Dashboard.ThemeSettingsComponent do
             module={BookingTextForm}
             id={"booking-text-form" <> page_suffix(@selected_page)}
             profile={@page_profile}
+          />
+
+          <.live_component
+            module={PageSettingsComponent}
+            id={"page-settings" <> page_suffix(@selected_page)}
+            profile={@profile}
+            page={@selected_page}
           />
         <% end %>
       </.dashboard_page>

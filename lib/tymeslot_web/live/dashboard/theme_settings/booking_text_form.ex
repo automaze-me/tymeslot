@@ -3,7 +3,8 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.BookingTextForm do
   Dashboard form for the booking page's introductory heading, greeting and
   instruction.
 
-  The wording is stored on the profile and applies to every theme, so this form
+  The wording is stored on the profile, or on the booking page whose tab is
+  open, and applies to every theme, so this form
   spells out what a single heading replaces in each of them: the two themes open
   differently by default, and an organiser editing one field needs to see both
   sentences it displaces.
