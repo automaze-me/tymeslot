@@ -10,6 +10,7 @@ defmodule Tymeslot.BookingPages do
   alias Ecto.Changeset
   alias Tymeslot.BookingPages.BookingPageQueries
   alias Tymeslot.BookingPages.BookingPageSchema
+  alias Tymeslot.MeetingTypes.GroupAccess
   alias Tymeslot.Profiles
   alias Tymeslot.Profiles.ProfileSchema
   alias Tymeslot.Repo
@@ -128,6 +129,41 @@ defmodule Tymeslot.BookingPages do
     with :ok <- ThemeCustomizations.delete_page_customizations(page.id) do
       BookingPageQueries.delete(page)
     end
+  end
+
+  @doc """
+  Lists `meeting_type_id` on `page` or takes it off. The caller has checked the
+  type is the page owner's.
+  """
+  @spec set_meeting_type(page(), integer(), boolean()) :: :ok
+  def set_meeting_type(%BookingPageSchema{id: page_id}, meeting_type_id, true),
+    do: BookingPageQueries.add_meeting_type(page_id, meeting_type_id)
+
+  def set_meeting_type(%BookingPageSchema{id: page_id}, meeting_type_id, false),
+    do: BookingPageQueries.remove_meeting_type(page_id, meeting_type_id)
+
+  @doc """
+  The meeting types `page` offers on its start page: listed on it, active, and
+  not a paused group type, as `MeetingTypes.get_public_meeting_types/1` treats
+  the profile's own page.
+  """
+  @spec list_meeting_types(page()) :: [Tymeslot.MeetingTypes.MeetingTypeSchema.t()]
+  def list_meeting_types(%BookingPageSchema{id: page_id}) do
+    page_id
+    |> BookingPageQueries.list_meeting_types()
+    |> GroupAccess.reject_paused()
+  end
+
+  @doc """
+  Which extra pages each of the profile's meeting types is listed on. A type
+  on none of them has no key.
+  """
+  @spec memberships(integer()) :: %{optional(integer()) => MapSet.t(integer())}
+  def memberships(profile_id) do
+    profile_id
+    |> BookingPageQueries.memberships_for_profile()
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Map.new(fn {type_id, page_ids} -> {type_id, MapSet.new(page_ids)} end)
   end
 
   defp new_changeset(profile, attrs) do

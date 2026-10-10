@@ -4,7 +4,9 @@ defmodule Tymeslot.BookingPages.BookingPageQueries do
   """
   import Ecto.Query, warn: false
 
+  alias Tymeslot.BookingPages.BookingPageMeetingTypeSchema
   alias Tymeslot.BookingPages.BookingPageSchema
+  alias Tymeslot.MeetingTypes.MeetingTypeSchema
   alias Tymeslot.Repo
 
   @doc "A profile's pages, oldest first."
@@ -63,6 +65,70 @@ defmodule Tymeslot.BookingPages.BookingPageQueries do
   @doc "Whether a page with `id` exists."
   @spec exists?(integer()) :: boolean()
   def exists?(id), do: Repo.exists?(from(p in BookingPageSchema, where: p.id == ^id))
+
+  @doc "Lists a meeting type on a page; listing it again is a no-op."
+  @spec add_meeting_type(integer(), integer()) :: :ok
+  def add_meeting_type(page_id, meeting_type_id) do
+    %BookingPageMeetingTypeSchema{}
+    |> BookingPageMeetingTypeSchema.changeset(%{
+      booking_page_id: page_id,
+      meeting_type_id: meeting_type_id
+    })
+    |> Repo.insert!(on_conflict: :nothing, conflict_target: [:booking_page_id, :meeting_type_id])
+
+    :ok
+  end
+
+  @doc "Takes a meeting type off a page; one not listed is a no-op."
+  @spec remove_meeting_type(integer(), integer()) :: :ok
+  def remove_meeting_type(page_id, meeting_type_id) do
+    query =
+      from(l in BookingPageMeetingTypeSchema,
+        where: l.booking_page_id == ^page_id and l.meeting_type_id == ^meeting_type_id
+      )
+
+    Repo.delete_all(query)
+
+    :ok
+  end
+
+  @doc """
+  The active meeting types listed on a page, in the host's order, preloaded
+  as `MeetingTypeQueries.list_public_meeting_types/1` preloads them. Only types
+  owned by the page's profile's user are listed, so a stray listing row for
+  someone else's type is never shown.
+  """
+  @spec list_meeting_types(integer()) :: [MeetingTypeSchema.t()]
+  def list_meeting_types(page_id) do
+    query =
+      from(mt in MeetingTypeSchema,
+        join: l in BookingPageMeetingTypeSchema,
+        on: l.meeting_type_id == mt.id,
+        join: p in BookingPageSchema,
+        on: p.id == l.booking_page_id,
+        join: pr in assoc(p, :profile),
+        where: l.booking_page_id == ^page_id and mt.is_active == true,
+        where: mt.user_id == pr.user_id,
+        order_by: [asc: mt.sort_order, asc: mt.name],
+        preload: [:video_integration, :calendar_integration]
+      )
+
+    Repo.all(query)
+  end
+
+  @doc "Every `{meeting_type_id, page_id}` listing among a profile's pages."
+  @spec memberships_for_profile(integer()) :: [{integer(), integer()}]
+  def memberships_for_profile(profile_id) do
+    query =
+      from(l in BookingPageMeetingTypeSchema,
+        join: p in BookingPageSchema,
+        on: p.id == l.booking_page_id,
+        where: p.profile_id == ^profile_id,
+        select: {l.meeting_type_id, l.booking_page_id}
+      )
+
+    Repo.all(query)
+  end
 
   @doc false
   @spec insert(Ecto.Changeset.t()) :: {:ok, BookingPageSchema.t()} | {:error, Ecto.Changeset.t()}
