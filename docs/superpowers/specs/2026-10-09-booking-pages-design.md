@@ -121,8 +121,10 @@ namespace:
 - Creating or renaming a page rejects an address that is reserved, is any
   profile's username, or is another page's address (the last one is also the
   unique index).
-- `Profiles.username_status/2` and the profile changeset reject a username
-  that is any page's address.
+- `ProfileQueries.username_available?/1`, which every username check goes
+  through (`Profiles.username_status/2`, default usernames), rejects any
+  page's address. The profile changeset itself stays a database uniqueness
+  check, as before.
 
 The two tables cannot share a database constraint, so a simultaneous
 username and page save could still collide. Resolution therefore always tries
