@@ -409,7 +409,7 @@ msgstr "Seite erstellen"
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Delete %{address}? Bookings made through it keep working and show your main page's look. Its colours and uploaded backgrounds are removed."
-msgstr "%{address} löschen? Darüber gemachte Buchungen funktionieren weiter und erscheinen im Look Ihrer Hauptseite. Die Farben und hochgeladenen Hintergründe der Seite werden entfernt."
+msgstr "%{address} löschen? Über diese Seite getätigte Buchungen bleiben bestehen und werden künftig im Erscheinungsbild Ihrer Hauptseite angezeigt. Die Farben und hochgeladenen Hintergründe der Seite werden entfernt."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -424,7 +424,7 @@ msgstr "Seite löschen"
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Inactive: not offered anywhere until you turn it back on."
-msgstr "Inaktiv: wird nirgends angeboten, bis Sie ihn wieder einschalten."
+msgstr "Inaktiv: wird nirgends angeboten, bis Sie ihn wieder aktivieren."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -465,7 +465,7 @@ msgstr "Speichern"
 #: lib/tymeslot_web/live/dashboard/theme_settings/pages_component.ex
 #, elixir-autogen, elixir-format
 msgid "The page starts with your main page's theme and colours, its own texts switched off, and no meeting types."
-msgstr "Die Seite übernimmt Design und Farben Ihrer Hauptseite, ohne eigene Texte und ohne Termintypen."
+msgstr "Die Seite übernimmt zunächst Design und Farben Ihrer Hauptseite, ohne eigene Texte und ohne Termintypen."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format

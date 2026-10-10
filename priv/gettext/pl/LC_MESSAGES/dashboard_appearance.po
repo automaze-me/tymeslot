@@ -405,7 +405,7 @@ msgstr "Utwórz stronę"
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Delete %{address}? Bookings made through it keep working and show your main page's look. Its colours and uploaded backgrounds are removed."
-msgstr "Usunąć %{address}? Rezerwacje dokonane przez tę stronę nadal działają i przyjmą wygląd strony głównej. Jej kolory i przesłane tła zostaną usunięte."
+msgstr "Usunąć %{address}? Rezerwacje dokonane przez tę stronę pozostają ważne i przyjmą wygląd strony głównej. Jej kolory i przesłane tła zostaną usunięte."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -461,7 +461,7 @@ msgstr "Zapisz"
 #: lib/tymeslot_web/live/dashboard/theme_settings/pages_component.ex
 #, elixir-autogen, elixir-format
 msgid "The page starts with your main page's theme and colours, its own texts switched off, and no meeting types."
-msgstr "Strona startuje z motywem i kolorami strony głównej, bez własnych tekstów i bez typów spotkań."
+msgstr "Strona otrzyma motyw i kolory strony głównej, bez własnych tekstów i bez typów spotkań."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format

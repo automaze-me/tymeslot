@@ -379,7 +379,7 @@ msgstr "Cancelar"
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Changing the address stops the old one working at once. Links in emails you have already sent keep working."
-msgstr "Ao mudar o endereço, o antigo deixa de funcionar na hora. Os links em e-mails já enviados continuam funcionando."
+msgstr "Ao mudar o endereço, o antigo deixa de funcionar imediatamente. Os links em e-mails já enviados continuam funcionando."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -409,7 +409,7 @@ msgstr "Criar página"
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Delete %{address}? Bookings made through it keep working and show your main page's look. Its colours and uploaded backgrounds are removed."
-msgstr "Excluir %{address}? Os agendamentos feitos por ela continuam funcionando e passam a ter a aparência da sua página principal. As cores e os fundos enviados da página são removidos."
+msgstr "Excluir %{address}? Os agendamentos feitos por esta página continuam válidos e passam a ter a aparência da sua página principal. As cores e os fundos enviados da página são removidos."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format

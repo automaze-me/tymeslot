@@ -63,7 +63,7 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.Card do
               title={
                 dgettext(
                   "dashboard_meeting_types",
-                  "Hidden from your public booking page; reachable only by its direct link"
+                  "On no booking page; reachable only by its direct link"
                 )
               }
             >

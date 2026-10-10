@@ -465,7 +465,7 @@ msgstr "Salva"
 #: lib/tymeslot_web/live/dashboard/theme_settings/pages_component.ex
 #, elixir-autogen, elixir-format
 msgid "The page starts with your main page's theme and colours, its own texts switched off, and no meeting types."
-msgstr "La pagina parte con il tema e i colori della tua pagina principale, senza testi propri e senza tipi di riunione."
+msgstr "La pagina parte con il tema e i colori della tua pagina principale, senza testi personalizzati e senza tipi di riunione."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format

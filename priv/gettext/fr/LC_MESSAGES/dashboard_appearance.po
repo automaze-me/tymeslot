@@ -409,7 +409,7 @@ msgstr "Créer la page"
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Delete %{address}? Bookings made through it keep working and show your main page's look. Its colours and uploaded backgrounds are removed."
-msgstr "Supprimer %{address} ? Les réservations faites par cette page continuent de fonctionner et prennent l’apparence de votre page principale. Ses couleurs et arrière-plans téléversés sont supprimés."
+msgstr "Supprimer %{address} ? Les réservations faites via cette page restent valables et prennent l’apparence de votre page principale. Ses couleurs et arrière-plans téléversés sont supprimés."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -424,7 +424,7 @@ msgstr "Supprimer la page"
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Inactive: not offered anywhere until you turn it back on."
-msgstr "Inactif : proposé nulle part tant que vous ne le réactivez pas."
+msgstr "Inactif : n’est proposé nulle part tant que vous ne le réactivez pas."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -465,7 +465,7 @@ msgstr "Enregistrer"
 #: lib/tymeslot_web/live/dashboard/theme_settings/pages_component.ex
 #, elixir-autogen, elixir-format
 msgid "The page starts with your main page's theme and colours, its own texts switched off, and no meeting types."
-msgstr "La page reprend le thème et les couleurs de votre page principale, sans textes propres ni types de réunion."
+msgstr "La page reprend le thème et les couleurs de votre page principale, sans texte personnalisé ni type de réunion."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format

@@ -485,4 +485,4 @@ msgstr "Ви редагуєте %{address}"
 #: lib/tymeslot_web/live/dashboard/theme_settings/pages_component.ex
 #, elixir-autogen, elixir-format
 msgid "You have reached the limit of %{count} booking pages. Delete one to add another."
-msgstr "Ви досягли ліміту в %{count} сторінок бронювання. Видаліть одну, щоб додати іншу."
+msgstr "Ви досягли ліміту %{count} сторінок бронювання. Видаліть одну, щоб додати іншу."
