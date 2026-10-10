@@ -10,11 +10,49 @@ defmodule Tymeslot.ThemeCustomizations.ThemeCustomizationQueries do
   alias Tymeslot.ThemeCustomizations.ThemeCustomizationSchema
 
   @doc """
-  Gets a theme customization by profile ID and theme ID.
+  Gets the profile's own customization for a theme: the one for its page at
+  `/<username>`, never one of its booking pages'.
   """
   @spec get_by_profile_and_theme(integer(), String.t()) :: ThemeCustomizationSchema.t() | nil
   def get_by_profile_and_theme(profile_id, theme_id) do
-    Repo.get_by(ThemeCustomizationSchema, profile_id: profile_id, theme_id: theme_id)
+    query =
+      from(tc in ThemeCustomizationSchema,
+        where: tc.profile_id == ^profile_id and tc.theme_id == ^theme_id,
+        where: is_nil(tc.booking_page_id)
+      )
+
+    Repo.one(query)
+  end
+
+  @doc """
+  Gets a booking page's customization for a theme.
+  """
+  @spec get_by_page_and_theme(integer(), String.t()) :: ThemeCustomizationSchema.t() | nil
+  def get_by_page_and_theme(page_id, theme_id) do
+    Repo.get_by(ThemeCustomizationSchema, booking_page_id: page_id, theme_id: theme_id)
+  end
+
+  @doc """
+  The profile's own customizations, one per theme it has customised.
+  """
+  @spec list_for_profile_page(integer()) :: [ThemeCustomizationSchema.t()]
+  def list_for_profile_page(profile_id) do
+    query =
+      from(tc in ThemeCustomizationSchema,
+        where: tc.profile_id == ^profile_id and is_nil(tc.booking_page_id)
+      )
+
+    Repo.all(query)
+  end
+
+  @doc """
+  A booking page's customizations.
+  """
+  @spec list_by_page(integer()) :: [ThemeCustomizationSchema.t()]
+  def list_by_page(page_id) do
+    query = from(tc in ThemeCustomizationSchema, where: tc.booking_page_id == ^page_id)
+
+    Repo.all(query)
   end
 
   @doc """
