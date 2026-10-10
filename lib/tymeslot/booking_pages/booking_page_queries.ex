@@ -66,17 +66,25 @@ defmodule Tymeslot.BookingPages.BookingPageQueries do
   @spec exists?(integer()) :: boolean()
   def exists?(id), do: Repo.exists?(from(p in BookingPageSchema, where: p.id == ^id))
 
-  @doc "Lists a meeting type on a page; listing it again is a no-op."
-  @spec add_meeting_type(integer(), integer()) :: :ok
+  @doc """
+  Lists a meeting type on a page; listing it again is a no-op. A page or type
+  deleted meanwhile is an error, not a crash.
+  """
+  @spec add_meeting_type(integer(), integer()) :: :ok | {:error, Ecto.Changeset.t()}
   def add_meeting_type(page_id, meeting_type_id) do
-    %BookingPageMeetingTypeSchema{}
-    |> BookingPageMeetingTypeSchema.changeset(%{
-      booking_page_id: page_id,
-      meeting_type_id: meeting_type_id
-    })
-    |> Repo.insert!(on_conflict: :nothing, conflict_target: [:booking_page_id, :meeting_type_id])
+    changeset =
+      BookingPageMeetingTypeSchema.changeset(%BookingPageMeetingTypeSchema{}, %{
+        booking_page_id: page_id,
+        meeting_type_id: meeting_type_id
+      })
 
-    :ok
+    case Repo.insert(changeset,
+           on_conflict: :nothing,
+           conflict_target: [:booking_page_id, :meeting_type_id]
+         ) do
+      {:ok, _link} -> :ok
+      {:error, _changeset} = error -> error
+    end
   end
 
   @doc "Takes a meeting type off a page; one not listed is a no-op."
@@ -134,12 +142,15 @@ defmodule Tymeslot.BookingPages.BookingPageQueries do
   @spec insert(Ecto.Changeset.t()) :: {:ok, BookingPageSchema.t()} | {:error, Ecto.Changeset.t()}
   def insert(changeset), do: Repo.insert(changeset)
 
-  @doc false
+  @doc """
+  Saves a page. A page deleted meanwhile, say in another tab, is an error on
+  `:id`, not a crash.
+  """
   @spec update(Ecto.Changeset.t()) :: {:ok, BookingPageSchema.t()} | {:error, Ecto.Changeset.t()}
-  def update(changeset), do: Repo.update(changeset)
+  def update(changeset), do: Repo.update(changeset, stale_error_field: :id)
 
-  @doc false
+  @doc "Deletes a page; one already gone counts as deleted."
   @spec delete(BookingPageSchema.t()) ::
           {:ok, BookingPageSchema.t()} | {:error, Ecto.Changeset.t()}
-  def delete(page), do: Repo.delete(page)
+  def delete(page), do: Repo.delete(page, allow_stale: true)
 end

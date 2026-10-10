@@ -45,6 +45,13 @@ defmodule Tymeslot.BookingPages.MembershipTest do
     assert BookingPages.list_meeting_types(ctx.page) == []
   end
 
+  test "listing a type on a page deleted meanwhile fails instead of raising", ctx do
+    type = insert(:meeting_type, user: ctx.user)
+    {:ok, _deleted} = BookingPages.delete(ctx.page)
+
+    assert {:error, _reason} = BookingPages.set_meeting_type(ctx.page, type.id, true)
+  end
+
   test "never lists another user's type, even with a membership row for it", ctx do
     stranger = insert(:user)
     foreign = insert(:meeting_type, user: stranger, name: "Foreign")

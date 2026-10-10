@@ -206,9 +206,9 @@ defmodule Tymeslot.BookingPages do
 
   @doc """
   Lists `meeting_type_id` on `page` or takes it off. The caller has checked the
-  type is the page owner's.
+  type is the page owner's. Listing on a page deleted meanwhile is an error.
   """
-  @spec set_meeting_type(page(), integer(), boolean()) :: :ok
+  @spec set_meeting_type(page(), integer(), boolean()) :: :ok | {:error, term()}
   def set_meeting_type(%BookingPageSchema{id: page_id}, meeting_type_id, true),
     do: BookingPageQueries.add_meeting_type(page_id, meeting_type_id)
 
