@@ -1,6 +1,6 @@
 # Booking pages: several start pages per host
 
-**Status:** approved design, not yet implemented
+**Status:** implemented on `feature/booking-pages`
 **Date:** 2026-10-09
 **Branch:** `feature/booking-pages`
 **Fork:** `automaze-me/tymeslot` (private use; not currently targeted at upstream)
@@ -132,19 +132,21 @@ the username first: a page can never take over another host's start page.
 
 ## Address resolution
 
-A new resolver, `BookingPages.resolve(segment)`, returns
-`{:ok, %{profile: profile, page: page_or_nil}}` or `:error`: the profile with
-that username and `page: nil`, else the profile owning the page with that
-address and the page, else `:error`.
-
-It is reached through the lookup the public entry points already share,
-`Profiles.get_profile_by_username/1`, which falls back to it when no username
-matches, and through `Profiles.resolve_organizer_context/1`. That covers:
+There is no separate resolver. The lookup the public entry points already
+share, `Profiles.get_profile_by_username/1`, tries the username first and,
+when none matches, falls back to `BookingPages.profile_for_address/1`. That
+returns the owning profile with the page laid over it
+(`BookingPages.apply_to_profile/2`): the page's theme and booking texts in
+place of the profile's, and the page itself in `profile.booking_page`, which
+is nil on a plain profile. Nothing is persisted from it. An unknown address
+returns nil, as an unknown username does. The same lookup serves
+`Profiles.resolve_organizer_context/1`. That covers:
 
 - `Profiles.resolve_organizer_context/1` (reached through `Demo` and
   `OrganizerHelpers.handle_username_resolution/2` from `Themes.Core.Dispatcher`
-  and `Themes.Shared.LiveHelpers`), which also puts `:booking_page` into the
-  organiser context;
+  and `Themes.Shared.LiveHelpers`), which carries the page as
+  `profile.booking_page` in the organiser context and lists that page's
+  meeting types;
 - `TymeslotWeb.Hooks.ThemeHook`;
 - `TymeslotWeb.Hooks.EmbedAuthHook`;
 - `TymeslotWeb.Plugs.SecurityHeadersPlug` (frame-ancestors from the profile's
@@ -152,7 +154,8 @@ matches, and through `Profiles.resolve_organizer_context/1`. That covers:
 - `TymeslotWeb.Hooks.PageViewHook`;
 - `TymeslotWeb.MeetingCalendarController` (`.ics` download).
 
-Callers that only need the owner use `profile` and behave exactly as before.
+Callers that only need the owner read the same profile fields and behave
+exactly as before.
 The demo provider resolves usernames only. None of these lookups is cached
 today, so renaming or deleting a page takes effect on the next request.
 
@@ -181,20 +184,22 @@ dropped and the booking succeeds.
 **Emails and managing a booking.** Cancel and reschedule links stay
 `/<username>/meeting/<uid>/…`, built by `Bookings.Policy` as today, so a page
 rename or deletion never breaks a link already sent. On those routes,
-`ThemeHook` and the theme context take the theme and colours from the
-meeting's page when it still exists, otherwise from the profile. The
+`MountHelpers.mount_meeting_management/4` lays the meeting's page over the
+profile when it still exists (`BookingPages.for_meeting/2`), so the theme and
+colours come from the page, otherwise from the profile. The
 cancellation email's "Book Another Time" link (`AppointmentBuilder`,
 `UrlBuilder.booking_url/1`) points to the meeting's page address when the page
 still exists.
 
 **Embeds.** The snippet's `data-username` accepts a page address through the
-resolver. Allowed embed domains stay one list per profile.
+same lookup. Allowed embed domains stay one list per profile.
 
 ## Theme resolution
 
-`ThemeHook` takes the theme id from `page.booking_theme` when the resolver
-returns a page, otherwise from the profile, as now. `Themes.Core.Context`
-loads customisations for `(page, theme)` when there is a page and for
+`ThemeHook` takes the theme id from the profile it resolves, which for a page
+address carries `page.booking_theme`, otherwise the profile's own, as now.
+`Themes.Core.Context` loads customisations for `(page, theme)` when
+`profile.booking_page` is set and for
 `(profile, theme)` with `booking_page_id IS NULL` otherwise, falling back to
 `ThemeCustomizations.get_defaults/1` as today.
 
@@ -202,7 +207,9 @@ A new page starts with the `/<username>` page's theme and copies of its
 customisation rows: colour scheme, palette seed and gradient background.
 Uploaded image and video backgrounds are not copied; those rows fall back to
 the theme's default background. Sharing one file between pages would let
-deleting one page remove another's background.
+deleting one page remove another's background. A page's own uploads are
+stored with a `page-<page_id>-` filename prefix, so they never share a file
+with the profile's or another page's.
 
 ## Dashboard
 
@@ -256,8 +263,8 @@ namespace).
 ## Testing
 
 - **Domain** (`BookingPages`): create, rename, delete; the cap; address
-  validation in both directions, including reserved paths; the resolver
-  (username first, page second, unknown is `:error`); per-page listing,
+  validation in both directions, including reserved paths; the address
+  lookup (username first, page second, unknown is nil); per-page listing,
   hidden-from-all, inactive and paused types left out; per-page customisation
   uniqueness and the copy on create, uploads excluded.
 - **Migration**: existing customisation rows stay the profile's; the partial
@@ -282,7 +289,7 @@ New:
 
 - `priv/repo/migrations/*_create_booking_pages.exs`: both tables, the two new
   columns, the customisation index change.
-- `lib/tymeslot/booking_pages.ex`: context (CRUD, cap, membership, resolver,
+- `lib/tymeslot/booking_pages.ex`: context (CRUD, cap, membership, address lookup,
   listing, customisation copy).
 - `lib/tymeslot/booking_pages/booking_page_schema.ex`,
   `booking_page_meeting_type_schema.ex`, `booking_page_queries.ex`.
@@ -293,9 +300,9 @@ New:
 Changed (narrow hooks):
 
 - `lib/tymeslot/profiles.ex`, `profiles/organizer_context.ex`,
-  `profiles/profile_schema.ex`: resolver use, organiser context page,
+  `profiles/profile_schema.ex`: address lookup, organiser context page,
   username/page namespace check.
-- `lib/tymeslot/demo/behaviour.ex`, `demo/no_op.ex`: resolver passthrough.
+- `lib/tymeslot/demo/behaviour.ex`, `demo/no_op.ex`: lookup passthrough.
 - `lib/tymeslot/theme_customizations.ex`, `theme_customization_schema.ex`,
   `theme_customization_queries.ex`: per-page rows.
 - `lib/tymeslot/meetings/meeting_schema.ex`, `bookings/build_params.ex`,
