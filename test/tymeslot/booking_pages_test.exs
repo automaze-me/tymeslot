@@ -74,6 +74,13 @@ defmodule Tymeslot.BookingPagesTest do
 
       assert {"has already been taken", _opts} = changeset.errors[:slug]
     end
+
+    test "a page deleted meanwhile is not found, not a crash", %{profile: profile} do
+      page = insert(:booking_page, profile: profile, slug: "einfachiso", name: "Old")
+      {:ok, _deleted} = BookingPages.delete(page)
+
+      assert {:error, :not_found} = BookingPages.update_details(page, %{"name" => "New"})
+    end
   end
 
   test "update_theme/2 changes only the page", %{profile: profile} do
@@ -110,6 +117,13 @@ defmodule Tymeslot.BookingPagesTest do
     assert {:ok, _deleted} = BookingPages.delete(page)
     assert BookingPages.list(profile.id) == []
     assert ThemeCustomizations.get_by_profile_and_theme(profile.id, "1")
+  end
+
+  test "delete/1 of a page already deleted, say in another tab, succeeds", %{profile: profile} do
+    page = insert(:booking_page, profile: profile)
+    {:ok, _deleted} = BookingPages.delete(page)
+
+    assert {:ok, _deleted_again} = BookingPages.delete(page)
   end
 
   test "fetch/2 only finds the profile's own pages", %{profile: profile} do

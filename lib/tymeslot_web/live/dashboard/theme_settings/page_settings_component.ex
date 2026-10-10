@@ -171,6 +171,10 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.PageSettingsComponent do
          |> assign(page: page, details_form: details_form(page, socket.assigns.id))
          |> push_patch(to: ThemeSettingsComponent.theme_path(page))}
 
+      {:error, :not_found} ->
+        Flash.error(dgettext("dashboard_appearance", "This booking page no longer exists."))
+        {:noreply, push_patch(socket, to: ThemeSettingsComponent.theme_path(nil))}
+
       {:error, changeset} ->
         {:noreply, assign(socket, :details_form, page_form(changeset, socket.assigns.id))}
     end

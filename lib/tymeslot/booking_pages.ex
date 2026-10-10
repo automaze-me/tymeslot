@@ -163,14 +163,29 @@ defmodule Tymeslot.BookingPages do
     |> Map.put(:action, :validate)
   end
 
-  @doc "Renames a page or moves it to another address."
-  @spec update_details(page(), map()) :: {:ok, page()} | {:error, Changeset.t()}
+  @doc """
+  Renames a page or moves it to another address. A page deleted meanwhile, say
+  in another tab, is not found, as `fetch/2` would report it.
+  """
+  @spec update_details(page(), map()) ::
+          {:ok, page()} | {:error, :not_found} | {:error, Changeset.t()}
   def update_details(%BookingPageSchema{} = page, attrs) do
     page
     |> BookingPageSchema.details_changeset(attrs)
     |> validate_address_free(page.slug)
     |> BookingPageQueries.update()
+    |> not_found_when_gone()
   end
+
+  # `BookingPageQueries.update/1` reports a vanished row as a stale `:id`.
+  defp not_found_when_gone({:error, %Changeset{errors: errors}} = result) do
+    case errors[:id] do
+      {_message, opts} -> if opts[:stale], do: {:error, :not_found}, else: result
+      nil -> result
+    end
+  end
+
+  defp not_found_when_gone(result), do: result
 
   @doc "Switches a page to another theme."
   @spec update_theme(page(), String.t()) :: {:ok, page()} | {:error, Changeset.t()}

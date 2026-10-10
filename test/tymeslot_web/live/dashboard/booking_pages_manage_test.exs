@@ -206,6 +206,22 @@ defmodule TymeslotWeb.Dashboard.BookingPagesManageTest do
     assert has_element?(view, "#page-settings-#{page.id}-details input[value='einfachISO']")
   end
 
+  test "saving a page deleted in another tab says so and shows the profile's tab", ctx do
+    page = insert(:booking_page, profile: ctx.profile, slug: "einfachiso", name: "Old")
+    {:ok, view, _html} = live(ctx.conn, ~p"/dashboard/theme?#{[page: page.id]}")
+
+    {:ok, _deleted} = BookingPages.delete(page)
+
+    view
+    |> form("#page-settings-#{page.id}-details", page: %{name: "New", slug: "einfachiso"})
+    |> render_submit()
+
+    assert has_element?(view, "#app-flash-group-error", "This booking page no longer exists.")
+    assert_patch(view, ~p"/dashboard/theme")
+    refute has_element?(view, "#page-settings-#{page.id}")
+    assert has_element?(view, "#page-settings")
+  end
+
   test "deletes a page after confirming", %{conn: conn, profile: profile} do
     page = insert(:booking_page, profile: profile, slug: "einfachiso")
     {:ok, view, _html} = live(conn, ~p"/dashboard/theme?#{[page: page.id]}")
