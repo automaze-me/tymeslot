@@ -21,9 +21,71 @@ defmodule Tymeslot.BookingPages do
 
   @max_pages 10
 
+  # The page settings a page carries in place of its owner's.
+  @page_settings [
+    :booking_theme,
+    :booking_text_enabled,
+    :booking_heading,
+    :booking_greeting,
+    :booking_instruction
+  ]
+
   @doc "The most extra pages one profile may hold."
   @spec max_pages() :: pos_integer()
   def max_pages, do: @max_pages
+
+  @doc """
+  `profile` as `page` presents it: the page's theme and booking texts in place
+  of the profile's, and the page itself under the virtual `:booking_page`.
+  Name, photo, timezone, username and embed domains stay the profile's.
+
+  Everything that renders a start page reads these fields off the profile, so
+  it renders the page without knowing pages exist. Never persist the result.
+  """
+  @spec apply_to_profile(ProfileSchema.t(), page()) :: ProfileSchema.t()
+  def apply_to_profile(%ProfileSchema{} = profile, %BookingPageSchema{} = page) do
+    profile
+    |> struct(Map.take(page, @page_settings))
+    |> Map.put(:booking_page, page)
+  end
+
+  @doc """
+  The owner's profile, as the page at `address` presents it, or nil when no
+  page has that address. Callers try usernames first.
+  """
+  @spec profile_for_address(String.t()) :: ProfileSchema.t() | nil
+  def profile_for_address(address) when is_binary(address) do
+    case BookingPageQueries.get_by_slug(address, [:profile]) do
+      nil -> nil
+      page -> apply_to_profile(page.profile, page)
+    end
+  end
+
+  @doc """
+  `profile_for_address/1` with the owner's user preloaded, as the scheduling
+  flow's organiser context needs it.
+  """
+  @spec resolve_with_user(String.t()) :: {:ok, ProfileSchema.t()} | {:error, :not_found}
+  def resolve_with_user(address) when is_binary(address) do
+    case BookingPageQueries.get_by_slug(address, profile: :user) do
+      nil -> {:error, :not_found}
+      page -> {:ok, apply_to_profile(page.profile, page)}
+    end
+  end
+
+  @doc """
+  The address a profile's start page is at: its page's for a profile resolved
+  through a page, otherwise its username.
+  """
+  @spec public_address(map() | nil) :: String.t() | nil
+  def public_address(%{booking_page: %BookingPageSchema{slug: slug}}), do: slug
+  def public_address(%{username: username}), do: username
+  def public_address(_no_profile), do: nil
+
+  @doc "The page a profile was resolved through, by id, or nil."
+  @spec page_id(map() | nil) :: integer() | nil
+  def page_id(%{booking_page: %BookingPageSchema{id: id}}), do: id
+  def page_id(_profile), do: nil
 
   @doc "A profile's pages, oldest first."
   @spec list(integer()) :: [page()]
