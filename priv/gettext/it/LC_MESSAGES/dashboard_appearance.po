@@ -409,7 +409,7 @@ msgstr "Crea pagina"
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Delete %{address}? Bookings made through it keep working and show your main page's look. Its colours and uploaded backgrounds are removed."
-msgstr "Eliminare %{address}? Le prenotazioni fatte tramite questa pagina restano valide e mostrano l'aspetto della tua pagina principale. I suoi colori e gli sfondi caricati vengono rimossi."
+msgstr "Eliminare %{address}? Le prenotazioni fatte tramite questa pagina restano valide e mostrano l'aspetto della tua pagina principale. I colori e gli sfondi caricati di questa pagina vengono rimossi."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format

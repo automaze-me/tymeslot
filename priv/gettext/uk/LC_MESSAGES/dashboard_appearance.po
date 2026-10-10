@@ -409,7 +409,7 @@ msgstr "Створити сторінку"
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Delete %{address}? Bookings made through it keep working and show your main page's look. Its colours and uploaded backgrounds are removed."
-msgstr "Видалити %{address}? Бронювання, зроблені через неї, працюватимуть і далі та матимуть вигляд вашої головної сторінки. Її кольори та завантажені фони буде видалено."
+msgstr "Видалити %{address}? Бронювання, зроблені через цю сторінку, залишаться чинними та матимуть вигляд вашої головної сторінки. Кольори та завантажені фони цієї сторінки буде видалено."
 
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
