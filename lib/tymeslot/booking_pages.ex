@@ -12,6 +12,7 @@ defmodule Tymeslot.BookingPages do
   alias Tymeslot.BookingPages.BookingPageSchema
   alias Tymeslot.MeetingTypes.GroupAccess
   alias Tymeslot.Profiles
+  alias Tymeslot.Profiles.ProfileQueries
   alias Tymeslot.Profiles.ProfileSchema
   alias Tymeslot.Repo
   alias Tymeslot.ThemeCustomizations
@@ -55,7 +56,7 @@ defmodule Tymeslot.BookingPages do
   """
   @spec profile_for_address(String.t()) :: ProfileSchema.t() | nil
   def profile_for_address(address) when is_binary(address) do
-    case BookingPageQueries.get_by_slug(address, [:profile]) do
+    case page_at(address, [:profile]) do
       nil -> nil
       page -> apply_to_profile(page.profile, page)
     end
@@ -67,10 +68,22 @@ defmodule Tymeslot.BookingPages do
   """
   @spec resolve_with_user(String.t()) :: {:ok, ProfileSchema.t()} | {:error, :not_found}
   def resolve_with_user(address) when is_binary(address) do
-    case BookingPageQueries.get_by_slug(address, profile: :user) do
+    case page_at(address, profile: :user) do
       nil -> {:error, :not_found}
       page -> {:ok, apply_to_profile(page.profile, page)}
     end
+  end
+
+  # A page is found whatever the case of its address, a username only as
+  # typed (usernames are stored lowercase). So the caller's username lookup
+  # misses `/Clash` for the username `clash`, and the username has to win
+  # here instead, as it does at `/clash`.
+  defp page_at(address, preload) do
+    lowercase = String.downcase(address)
+
+    if address != lowercase and match?({:ok, _profile}, ProfileQueries.get_by_username(lowercase)),
+      do: nil,
+      else: BookingPageQueries.get_by_slug(address, preload)
   end
 
   @doc """
@@ -82,15 +95,21 @@ defmodule Tymeslot.BookingPages do
   def public_address(%{username: username}), do: username
   def public_address(_no_profile), do: nil
 
+  @doc "A page as the dashboard lists it: its name, then its address."
+  @spec name_and_address(page()) :: String.t()
+  def name_and_address(%BookingPageSchema{name: name, slug: slug}), do: "#{name} · /#{slug}"
+
   @doc "The page a profile was resolved through, by id, or nil."
   @spec page_id(map() | nil) :: integer() | nil
   def page_id(%{booking_page: %BookingPageSchema{id: id}}), do: id
   def page_id(_profile), do: nil
 
   @doc """
-  `id` when that page still exists, otherwise nil. A booking keeps the page it
-  came through only while there is one: a page deleted while its visitor was
-  on the booking form must not make the booking fail.
+  `id` when that page still exists, otherwise nil: a booking keeps the page it
+  came through only while there is one, so a page deleted while its visitor
+  was on the booking form is dropped from the booking. This is a check before
+  the booking is written, not a guarantee: a page deleted between the check
+  and the insert still fails that booking on the foreign key.
   """
   @spec existing_id(integer() | nil) :: integer() | nil
   def existing_id(id) when is_integer(id),
@@ -197,13 +216,16 @@ defmodule Tymeslot.BookingPages do
 
   @doc """
   Saves a page's booking texts, under the rules the profile's own follow
-  (`ProfileSchema.booking_text_changeset/2`).
+  (`ProfileSchema.booking_text_changeset/2`). A page deleted meanwhile is not
+  found, as in `update_details/2`.
   """
-  @spec update_booking_text(page(), map()) :: {:ok, page()} | {:error, Changeset.t()}
+  @spec update_booking_text(page(), map()) ::
+          {:ok, page()} | {:error, :not_found} | {:error, Changeset.t()}
   def update_booking_text(%BookingPageSchema{} = page, attrs) do
     page
     |> ProfileSchema.booking_text_changeset(attrs)
     |> BookingPageQueries.update()
+    |> not_found_when_gone()
   end
 
   @doc """

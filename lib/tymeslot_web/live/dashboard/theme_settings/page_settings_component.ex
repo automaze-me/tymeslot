@@ -53,6 +53,9 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.PageSettingsComponent do
               icon="hero-clipboard-document"
               phx-hook="CopyOnClick"
               data-copy-text={page_url(@profile, @page)}
+              data-copy-feedback={
+                dgettext("dashboard_common", "Scheduling link copied to clipboard!")
+              }
             >
               {dgettext("dashboard_appearance", "Copy link")}
             </.action_button>

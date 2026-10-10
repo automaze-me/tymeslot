@@ -463,6 +463,7 @@ msgstr "Zapisz"
 msgid "The page starts with your main page's theme and colours, its own texts switched off, and no meeting types."
 msgstr "Strona otrzyma motyw i kolory strony głównej, bez własnych tekstów i bez typów spotkań."
 
+#: lib/tymeslot_web/live/dashboard/theme_settings/booking_text_form.ex
 #: lib/tymeslot_web/live/dashboard/theme_settings/page_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "This booking page no longer exists."

@@ -4,6 +4,7 @@ defmodule TymeslotWeb.Dashboard.BookingPagesManageTest do
   @moduletag :dashboard
   @moduletag :themes
 
+  import ExUnit.CaptureLog
   import Tymeslot.DashboardTestHelpers
   import Tymeslot.Factory
 
@@ -46,25 +47,25 @@ defmodule TymeslotWeb.Dashboard.BookingPagesManageTest do
     assert BookingPages.list(profile.id) == []
   end
 
-  # The main page's colours are copied once the page is written; when the copy
-  # fails nothing is created, and the dialog says so instead of going blank.
-  test "the dialog says so when the main page's colours cannot be copied", ctx do
+  # The main page's colours are copied once the page is written. A colour row
+  # saved under rules since tightened is left out of the copy rather than
+  # blocking the new page.
+  test "a main page colour row the current rules reject does not block a new page", ctx do
     insert(:theme_customization, profile: ctx.profile, theme_id: "1", color_scheme: "no-such")
     {:ok, view, _html} = live(ctx.conn, ~p"/dashboard/theme")
 
     view |> element("[data-testid='new-booking-page']") |> render_click()
 
-    view
-    |> form("#new-booking-page-form", page: %{name: "einfachISO", slug: "einfachiso"})
-    |> render_submit()
+    log =
+      capture_log(fn ->
+        view
+        |> form("#new-booking-page-form", page: %{name: "einfachISO", slug: "einfachiso"})
+        |> render_submit()
+      end)
 
-    assert BookingPages.list(ctx.profile.id) == []
-
-    assert has_element?(
-             view,
-             "#app-flash-group-error",
-             "Could not create the booking page. Please try again."
-           )
+    assert [page] = BookingPages.list(ctx.profile.id)
+    assert_patch(view, ~p"/dashboard/theme?#{[page: page.id]}")
+    assert log =~ "Skipped a colour row"
   end
 
   # The address follows the name, keystroke by keystroke, until the host
@@ -96,6 +97,23 @@ defmodule TymeslotWeb.Dashboard.BookingPagesManageTest do
     assert has_element?(view, "#new-booking-page-form input[name='page[slug]'][value='iso']")
   end
 
+  test "the suggested address spells out umlauts and drops other accents", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/dashboard/theme")
+
+    view |> element("[data-testid='new-booking-page']") |> render_click()
+
+    for {name, address} <- [{"Prüfung Süß", "pruefung-suess"}, {"ÄÖÜ Café", "aeoeue-cafe"}] do
+      view
+      |> form("#new-booking-page-form", page: %{name: name})
+      |> render_change(%{_target: ["page", "name"]})
+
+      assert has_element?(
+               view,
+               "#new-booking-page-form input[name='page[slug]'][value='#{address}']"
+             )
+    end
+  end
+
   test "the new page button stops at the cap", %{conn: conn, profile: profile} do
     for n <- 1..BookingPages.max_pages(),
         do: insert(:booking_page, profile: profile, slug: "cap-#{n}")
@@ -106,13 +124,28 @@ defmodule TymeslotWeb.Dashboard.BookingPagesManageTest do
   end
 
   test "a tab switches to its page", %{conn: conn, profile: profile} do
-    page = insert(:booking_page, profile: profile, slug: "einfachiso")
+    page = insert(:booking_page, profile: profile, slug: "einfachiso", name: "Einfach ISO")
     {:ok, view, _html} = live(conn, ~p"/dashboard/theme")
+
+    assert has_element?(view, "#booking-page-tabs-tab-profile", "/joern")
+    assert has_element?(view, "#booking-page-tabs-tab-#{page.id}", "Einfach ISO · /einfachiso")
 
     view |> element("#booking-page-tabs-tab-#{page.id}") |> render_click()
 
     assert_patch(view, ~p"/dashboard/theme?#{[page: page.id]}")
     assert has_element?(view, "#booking-page-tabs-tab-#{page.id}[aria-current='page']")
+  end
+
+  # Without its own feedback text the copy hook falls back to an English toast.
+  test "the copy link button confirms in the host's language", %{conn: conn, profile: profile} do
+    page = insert(:booking_page, profile: profile, slug: "einfachiso")
+    feedback = "[data-copy-feedback='Scheduling link copied to clipboard!']"
+
+    {:ok, view, _html} = live(conn, ~p"/dashboard/theme")
+    assert has_element?(view, "#page-settings-copy" <> feedback)
+
+    {:ok, view, _html} = live(conn, ~p"/dashboard/theme?#{[page: page.id]}")
+    assert has_element?(view, "#page-settings-#{page.id}-copy" <> feedback)
   end
 
   # The page comes from the address bar, so whatever is there resolves to one
@@ -202,7 +235,7 @@ defmodule TymeslotWeb.Dashboard.BookingPagesManageTest do
     |> render_submit()
 
     assert %{name: "einfachISO", slug: "iso"} = Repo.reload!(page)
-    assert has_element?(view, "#booking-page-tabs-tab-#{page.id}", "/iso")
+    assert has_element?(view, "#booking-page-tabs-tab-#{page.id}", "einfachISO · /iso")
     assert has_element?(view, "#page-settings-#{page.id}-details input[value='einfachISO']")
   end
 

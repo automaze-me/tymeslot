@@ -3,6 +3,7 @@ defmodule Tymeslot.BookingPagesTest do
 
   @moduletag :profiles
 
+  import ExUnit.CaptureLog
   import Tymeslot.Factory
 
   alias Tymeslot.BookingPages
@@ -28,6 +29,27 @@ defmodule Tymeslot.BookingPagesTest do
 
       assert %{color_scheme: "ocean"} =
                ThemeCustomizations.get_by_profile_and_theme({profile.id, page.id}, "2")
+    end
+
+    # A row saved under rules since tightened (a retired scheme, preset or
+    # theme) cannot be copied as it is; the page starts without it.
+    test "skips a colour row the current rules reject and copies the rest", %{profile: profile} do
+      insert(:theme_customization, profile: profile, theme_id: "2", color_scheme: "ocean")
+      insert(:theme_customization, profile: profile, theme_id: "1", color_scheme: "no-such")
+
+      {result, log} =
+        with_log(fn ->
+          BookingPages.create(profile, %{"name" => "einfachISO", "slug" => "einfachiso"})
+        end)
+
+      assert {:ok, page} = result
+
+      assert %{color_scheme: "ocean"} =
+               ThemeCustomizations.get_by_profile_and_theme({profile.id, page.id}, "2")
+
+      refute ThemeCustomizations.get_by_profile_and_theme({profile.id, page.id}, "1")
+      assert log =~ "Skipped a colour row"
+      assert log =~ "color_scheme"
     end
 
     test "refuses an address that is a username", %{profile: profile} do

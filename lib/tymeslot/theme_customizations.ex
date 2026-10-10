@@ -6,7 +6,10 @@ defmodule Tymeslot.ThemeCustomizations do
 
   use Gettext, backend: TymeslotWeb.Gettext
 
+  require Logger
+
   alias Ecto.Changeset
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Profiles.ProfileSchema
   alias Tymeslot.ThemeCustomizations.ThemeCustomizationQueries
   alias Tymeslot.ThemeCustomizations.ThemeCustomizationSchema
@@ -397,7 +400,12 @@ defmodule Tymeslot.ThemeCustomizations do
   copied. An uploaded image or video background (`background_value == "custom"`)
   is not: the page gets that theme's default background instead, since a file
   shared between two rows would be deleted from under one of them when the
-  other replaced it. Stops at, and returns, the first failed insert.
+  other replaced it.
+
+  A row the current rules reject (saved before a scheme, preset or theme was
+  retired) is left out and logged, so it cannot stop the page being created;
+  that theme starts from its defaults on the page. Stops at, and returns, the
+  first insert the database refuses.
   """
   @spec copy_to_page(profile_id(), pos_integer()) :: :ok | {:error, Changeset.t()}
   def copy_to_page(profile_id, page_id) do
@@ -406,9 +414,26 @@ defmodule Tymeslot.ThemeCustomizations do
     |> Enum.reduce_while(:ok, fn row, :ok ->
       case create_theme_customization({profile_id, page_id}, row.theme_id, copy_attrs(row)) do
         {:ok, _copy} -> {:cont, :ok}
-        {:error, _changeset} = error -> {:halt, error}
+        {:error, changeset} -> skip_or_stop(changeset, row, page_id)
       end
     end)
+  end
+
+  # A constraint error is the database refusing the row; anything else is a
+  # validation the row failed before it reached the database.
+  defp skip_or_stop(%Changeset{errors: errors} = changeset, row, page_id) do
+    if Enum.any?(errors, fn {_field, {_message, opts}} -> Keyword.has_key?(opts, :constraint) end) do
+      {:halt, {:error, changeset}}
+    else
+      Logger.warning("Skipped a colour row the current rules reject while copying it to a page",
+        profile_id: row.profile_id,
+        page_id: page_id,
+        theme_id: row.theme_id,
+        reason: LogFormat.reason(errors)
+      )
+
+      {:cont, :ok}
+    end
   end
 
   @doc """

@@ -9,10 +9,13 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.PagesComponent do
   use TymeslotWeb, :live_component
   use Gettext, backend: TymeslotWeb.Gettext
 
+  require Logger
+
   alias Ecto.Changeset
   alias Phoenix.LiveView.JS
   alias Tymeslot.BookingPages
   alias Tymeslot.BookingPages.BookingPageSchema
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias TymeslotWeb.Components.CoreComponents.Modal
   alias TymeslotWeb.Dashboard.ThemeSettingsComponent
   alias TymeslotWeb.Live.Shared.Flash
@@ -153,9 +156,15 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.PagesComponent do
       {:error, %Changeset{data: %BookingPageSchema{}} = changeset} ->
         {:noreply, assign(socket, :form, page_form(changeset))}
 
-      # Copying the main page's colours failed, so nothing was created. The
-      # changeset is the colours', which this form has no fields for.
-      {:error, _colours} ->
+      # The database refused a copy of the main page's colours, so nothing was
+      # created. The changeset is the colours', which this form has no fields
+      # for.
+      {:error, colours} ->
+        Logger.error("Could not copy the main page's colours to a new booking page",
+          profile_id: socket.assigns.profile.id,
+          reason: LogFormat.reason(colours)
+        )
+
         Flash.error(
           dgettext("dashboard_appearance", "Could not create the booking page. Please try again.")
         )
@@ -174,20 +183,31 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.PagesComponent do
   # Its own input ids, apart from the page details form further down.
   defp page_form(changeset), do: to_form(changeset, as: :page, id: "new-booking-page")
 
+  # German letters are spelt out as an address would be typed (Prüfung →
+  # pruefung); any other accent is dropped (Café → cafe).
   defp slug_from(name) do
     (name || "")
     |> String.downcase()
+    |> String.normalize(:nfc)
+    |> String.replace(["ä", "ö", "ü", "ß"], &spelt_out/1)
+    |> String.normalize(:nfd)
+    |> String.replace(~r/[\x{0300}-\x{036f}]/u, "")
     |> String.replace(~r/[^a-z0-9]+/, "-")
     |> String.trim("-")
   end
 
+  defp spelt_out("ä"), do: "ae"
+  defp spelt_out("ö"), do: "oe"
+  defp spelt_out("ü"), do: "ue"
+  defp spelt_out("ß"), do: "ss"
+
   defp tabs(profile, pages) do
-    profile_tab = tab("profile", profile.username, nil)
-    [profile_tab | Enum.map(pages, &tab(to_string(&1.id), &1.slug, &1))]
+    profile_tab = tab("profile", "/" <> (profile.username || ""), nil)
+    [profile_tab | Enum.map(pages, &tab(to_string(&1.id), BookingPages.name_and_address(&1), &1))]
   end
 
-  defp tab(id, address, page),
-    do: %{id: id, label: "/" <> (address || ""), patch: ThemeSettingsComponent.theme_path(page)}
+  defp tab(id, label, page),
+    do: %{id: id, label: label, patch: ThemeSettingsComponent.theme_path(page)}
 
   defp active_tab(nil), do: "profile"
   defp active_tab(page), do: to_string(page.id)

@@ -60,6 +60,25 @@ defmodule Tymeslot.BookingPages.ResolutionTest do
     assert resolved.booking_page == nil
   end
 
+  # Pages are found whatever the case of the address, usernames only as typed
+  # (`/Clash` never found the username `clash`): an address in other case than
+  # a username must not reach the page either.
+  test "a username wins over a page in any case of the address" do
+    insert(:profile, username: "clash")
+    insert(:booking_page, slug: "clash")
+
+    for address <- ["Clash", "CLASH"] do
+      assert Profiles.get_profile_by_username(address) == nil
+      assert Profiles.resolve_organizer_context(address) == {:error, :profile_not_found}
+    end
+  end
+
+  test "a page address resolves in any case", %{page: page} do
+    assert Profiles.get_profile_by_username("EinfachISO").booking_page.id == page.id
+    assert {:ok, context} = Profiles.resolve_organizer_context("EinfachISO")
+    assert context.profile.booking_page.id == page.id
+  end
+
   test "an unknown address resolves to nothing" do
     assert Profiles.get_profile_by_username("nobody-here") == nil
     assert Profiles.resolve_organizer_context("nobody-here") == {:error, :profile_not_found}

@@ -57,6 +57,9 @@ defmodule Tymeslot.ThemeCustomizations.ThemeCustomizationQueries do
 
   @doc """
   Gets all theme customizations for a profile.
+
+  Its booking pages' rows carry the profile id too, so they are included:
+  `list_for_profile_page/1` returns the profile's own page's rows alone.
   """
   @spec get_all_by_profile_id(integer()) :: [ThemeCustomizationSchema.t()]
   def get_all_by_profile_id(profile_id) do

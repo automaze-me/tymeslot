@@ -24,6 +24,19 @@ defmodule TymeslotWeb.Dashboard.EmbedBookingPagesTest do
     refute has_element?(view, "#embed-page-picker")
   end
 
+  test "the picker names each page and its address", %{conn: conn, profile: profile} do
+    page = insert(:booking_page, profile: profile, slug: "einfachiso", name: "Einfach ISO")
+    {:ok, view, _html} = live(conn, ~p"/dashboard/embed")
+
+    assert has_element?(view, "#embed-page-picker option[value='profile']", "/joern")
+
+    assert has_element?(
+             view,
+             "#embed-page-picker option[value='#{page.id}']",
+             "Einfach ISO · /einfachiso"
+           )
+  end
+
   test "the snippet follows the chosen page", %{conn: conn, profile: profile} do
     page = insert(:booking_page, profile: profile, slug: "einfachiso")
     {:ok, view, html} = live(conn, ~p"/dashboard/embed")

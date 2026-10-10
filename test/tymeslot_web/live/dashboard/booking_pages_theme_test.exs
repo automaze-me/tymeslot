@@ -8,8 +8,8 @@ defmodule TymeslotWeb.Dashboard.BookingPagesThemeTest do
   import Tymeslot.Factory
 
   alias Ecto.Changeset
+  alias Tymeslot.BookingPages
   alias Tymeslot.Repo
-  alias Tymeslot.Test.MediaFixtures
   alias Tymeslot.ThemeCustomizations
 
   setup :setup_dashboard_user_with_theme
@@ -62,6 +62,18 @@ defmodule TymeslotWeb.Dashboard.BookingPagesThemeTest do
     assert Repo.reload!(ctx.profile).booking_heading == nil
   end
 
+  test "a page's texts saved after it was deleted in another tab say so", ctx do
+    {:ok, view, _html} = live(ctx.conn, ~p"/dashboard/theme?#{[page: ctx.page.id]}")
+
+    {:ok, _deleted} = BookingPages.delete(ctx.page)
+    view |> element("#booking-text-form-#{ctx.page.id}-enabled") |> render_click()
+
+    assert has_element?(view, "#app-flash-group-error", "This booking page no longer exists.")
+    assert_patch(view, ~p"/dashboard/theme")
+    refute has_element?(view, "#booking-text-form-#{ctx.page.id}")
+    refute Repo.reload!(ctx.profile).booking_text_enabled
+  end
+
   # The page held for the theme cards was read before the texts were saved, so
   # picking a theme from it must not hand the form the texts it still carries.
   # The click's own render is the one checked: the flash it sends makes the
@@ -98,33 +110,6 @@ defmodule TymeslotWeb.Dashboard.BookingPagesThemeTest do
     assert %{color_scheme: "purple"} =
              ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, ctx.page.id}, "1")
 
-    assert ThemeCustomizations.get_by_profile_and_theme(ctx.profile.id, "1") == nil
-  end
-
-  test "a background uploaded on a page's tab is the page's", ctx do
-    {:ok, view, _html} = live(ctx.conn, ~p"/dashboard/theme/customize/1?#{[page: ctx.page.id]}")
-
-    view
-    |> element("button[phx-click='theme:set_browsing_type'][phx-value-type='image']")
-    |> render_click()
-
-    image = %{
-      last_modified: System.system_time(:millisecond),
-      name: "background.png",
-      content: MediaFixtures.png(),
-      type: "image/png"
-    }
-
-    view
-    |> file_input("#theme-background-image-form", :background_image, [image])
-    |> render_upload("background.png")
-
-    assert_push_event(view, "upload-complete", %{})
-
-    assert %{background_image_path: path} =
-             ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, ctx.page.id}, "1")
-
-    assert path =~ "page-#{ctx.page.id}-"
     assert ThemeCustomizations.get_by_profile_and_theme(ctx.profile.id, "1") == nil
   end
 

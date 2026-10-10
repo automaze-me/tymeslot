@@ -346,7 +346,7 @@ defmodule TymeslotWeb.Live.Dashboard.EmbedSettingsComponent do
   defp page_options(profile, pages) do
     [
       {"/" <> (profile.username || ""), "profile"}
-      | Enum.map(pages, &{"/" <> &1.slug, to_string(&1.id)})
+      | Enum.map(pages, &{BookingPages.name_and_address(&1), to_string(&1.id)})
     ]
   end
 

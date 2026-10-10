@@ -54,8 +54,10 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.BookingTextForm do
   alias Tymeslot.Security.RateLimiter
   alias Tymeslot.Themes.Catalog
   alias Tymeslot.Validation.Constraints
+  alias TymeslotWeb.Dashboard.ThemeSettingsComponent
   alias TymeslotWeb.Live.Dashboard.Shared.DashboardHelpers
   alias TymeslotWeb.Live.Scheduling.PreviewMode
+  alias TymeslotWeb.Live.Shared.Flash
   alias TymeslotWeb.Themes.Shared.BookingText
 
   @text_fields [:booking_heading, :booking_greeting, :booking_instruction]
@@ -403,6 +405,11 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.BookingTextForm do
         |> assign(:save_status, :saved)
         |> assign_form(ProfileSchema.booking_text_changeset(profile, %{}))
 
+      # The page's tab is open on a page deleted meanwhile, say in another tab.
+      {:error, :not_found} ->
+        Flash.error(dgettext("dashboard_appearance", "This booking page no longer exists."))
+        push_patch(socket, to: ThemeSettingsComponent.theme_path(nil))
+
       {:error, changeset} ->
         reject(socket, changeset)
     end
@@ -415,6 +422,9 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.BookingTextForm do
     case BookingPages.update_booking_text(page, params) do
       {:ok, page} ->
         {:ok, BookingPages.apply_to_profile(profile, page)}
+
+      {:error, :not_found} = not_found ->
+        not_found
 
       {:error, page_changeset} ->
         {:error,

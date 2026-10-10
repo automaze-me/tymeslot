@@ -115,6 +115,21 @@ defmodule TymeslotWeb.BookingPagePublicTest do
     refute own_html =~ "Private strategy"
   end
 
+  # Hidden from every start page, and still bookable by its direct link under
+  # any of the host's addresses.
+  test "a type on no page is still bookable by its direct link", %{conn: conn, user: user} do
+    hidden = insert(:meeting_type, user: user, name: "Hidden review", is_private: true)
+
+    for address <- ["einfachiso", "joern"] do
+      {:ok, _view, start_html} = live(conn, "/#{address}?timezone=#{@timezone}")
+      refute start_html =~ "Hidden review"
+
+      {:ok, view, _html} = live(conn, "/#{address}/hidden-review?timezone=#{@timezone}")
+      assert has_element?(view, "button[phx-click='next_month']")
+      assert :sys.get_state(view.pid).socket.assigns.meeting_type.id == hidden.id
+    end
+  end
+
   test "links inside the flow stay under the page's address", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/einfachiso/iso-audit?timezone=#{@timezone}")
 
