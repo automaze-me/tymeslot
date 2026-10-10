@@ -28,12 +28,38 @@ defmodule Tymeslot.Emails.EmailScheduler do
   # Meeting emails
 
   defdelegate schedule_confirmation_emails(meeting_id), to: MeetingScheduler
+  defdelegate schedule_seat_confirmation_emails(meeting_id, participant_id), to: MeetingScheduler
   defdelegate schedule_cancellation_emails(meeting_id), to: MeetingScheduler
+
+  defdelegate schedule_seat_cancellation_emails(meeting_id, participant_id, slot_freed?),
+    to: MeetingScheduler
 
   defdelegate schedule_reminder_emails(meeting_id, reminder_value, reminder_unit),
     to: MeetingScheduler
 
   defdelegate schedule_reminder_emails(meeting_id, reminder_value, reminder_unit, scheduled_at),
+    to: MeetingScheduler
+
+  defdelegate schedule_seat_reschedule_emails(
+                meeting_id,
+                participant_id,
+                old_participant_id,
+                old_slot_freed?
+              ),
+              to: MeetingScheduler
+
+  defdelegate schedule_seat_meeting_cancellation_email(meeting_id, participant_id),
+    to: MeetingScheduler
+
+  defdelegate schedule_seat_reminder_email(
+                meeting_id,
+                participant_id,
+                reminder_value,
+                reminder_unit
+              ),
+              to: MeetingScheduler
+
+  defdelegate schedule_seat_reschedule_request(meeting_id, participant_id, requested_at),
     to: MeetingScheduler
 
   defdelegate cancel_reminder_emails(meeting_id), to: MeetingScheduler
@@ -83,12 +109,20 @@ defmodule Tymeslot.Emails.EmailScheduler do
   defdelegate schedule_admin_alert(recipient, category, severity, message, metadata, opts \\ []),
     to: IntegrationScheduler
 
+  defdelegate schedule_admin_alert_digest(recipient, digest), to: IntegrationScheduler
+
   # --- Changeset validation (used by EmailWorker's Oban callback) ---
 
   @fields_by_action %{
     "send_confirmation_emails" => ["meeting_id"],
+    "send_seat_confirmation_emails" => ["meeting_id", "participant_id"],
     "send_cancellation_emails" => ["meeting_id"],
+    "send_seat_cancellation_emails" => ["meeting_id", "participant_id", "slot_freed"],
+    "send_seat_reschedule_emails" => ["meeting_id", "participant_id", "old_participant_id"],
     "send_reminder_emails" => ["meeting_id", "reminder_value", "reminder_unit"],
+    "send_seat_meeting_cancellation" => ["meeting_id", "participant_id"],
+    "send_seat_reminder" => ["meeting_id", "participant_id", "reminder_value", "reminder_unit"],
+    "send_seat_reschedule_request" => ["meeting_id", "participant_id"],
     "send_reschedule_request" => ["meeting_id"],
     "send_booking_request_emails" => ["meeting_id"],
     "send_booking_approval_nudge" => ["meeting_id"],
@@ -150,7 +184,8 @@ defmodule Tymeslot.Emails.EmailScheduler do
       "message",
       "metadata",
       "alert_hash"
-    ]
+    ],
+    "send_admin_alert_digest" => ["recipient", "entries"]
   }
 
   @doc """

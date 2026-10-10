@@ -30,9 +30,13 @@ defmodule Tymeslot.Workers.WebhookWorker do
   require Logger
 
   alias Tymeslot.Features
+  alias Tymeslot.Infrastructure.ErrorTracking
+  alias Tymeslot.Infrastructure.ExpectedJobOutcome
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Integrations.HealthCheck.ErrorAnalysis
   alias Tymeslot.Meetings.MeetingQueries
   alias Tymeslot.Meetings.MeetingSchema
+  alias Tymeslot.Meetings.SeatView
   alias Tymeslot.Webhooks
   alias Tymeslot.Workers.DeliveryClaims
 
@@ -70,16 +74,63 @@ defmodule Tymeslot.Workers.WebhookWorker do
   Called by the trigger site at the moment the event fires, so a retried
   delivery can replay what that event asserted rather than whatever the
   meeting looks like by the time the retry runs.
+
+  A group meeting's seat (`Tymeslot.Meetings.SeatView`) also pins the seats
+  taken on the slot when the event fired, under `"seats_taken"`, and the
+  seat a move replaced, under `"previous_seat"`.
   """
   @spec snapshot(MeetingSchema.t()) :: map()
   def snapshot(%MeetingSchema{} = meeting) do
     meeting
     |> Map.take(@snapshot_fields)
     |> Map.new(fn {field, value} -> {Atom.to_string(field), encode_snapshot_field(value)} end)
+    |> maybe_put_seats_taken(SeatView.seats_taken(meeting))
+    |> maybe_put_previous_seat(SeatView.previous_seat(meeting))
+  end
+
+  defp maybe_put_seats_taken(snapshot, nil), do: snapshot
+  defp maybe_put_seats_taken(snapshot, seats), do: Map.put(snapshot, "seats_taken", seats)
+
+  defp maybe_put_previous_seat(snapshot, nil), do: snapshot
+
+  defp maybe_put_previous_seat(snapshot, previous) do
+    Map.put(snapshot, "previous_seat", %{
+      "seat_id" => previous.seat_id,
+      "meeting_id" => previous.meeting_id,
+      "start_time" => DateTime.to_iso8601(previous.start_time)
+    })
   end
 
   defp encode_snapshot_field(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
   defp encode_snapshot_field(value), do: value
+
+  @behaviour ExpectedJobOutcome
+
+  # The work no longer applies, or the user's own endpoint refuses it: a
+  # blocked or broken redirect, or a 4xx it answers for good. Missing
+  # parameters and a 5xx are recorded.
+  @blocked_by_ssrf :blocked_by_ssrf
+  @blocked_redirect :blocked_redirect
+  @too_many_redirects :too_many_redirects
+  @redirect_missing_location :redirect_missing_location
+  @refused_destinations [
+    @blocked_by_ssrf,
+    @blocked_redirect,
+    @too_many_redirects,
+    @redirect_missing_location
+  ]
+  @http_status_prefix "HTTP "
+  @gone "Webhook or meeting not found"
+  @disabled "Webhook is disabled"
+  @insufficient_plan "Insufficient plan"
+
+  @impl ExpectedJobOutcome
+  def expected_outcome?(reason) when is_binary(reason) do
+    reason in [@gone, @disabled, @insufficient_plan] or
+      String.starts_with?(reason, @http_status_prefix <> "4")
+  end
+
+  def expected_outcome?(reason), do: reason in @refused_destinations
 
   @impl Oban.Worker
   def perform(
@@ -98,9 +149,9 @@ defmodule Tymeslot.Workers.WebhookWorker do
     feature = :automations_allowed
 
     with {:ok, webhook} <- WebhookQueries.get_webhook(webhook_id),
-         :ok = Logger.metadata(user_id: webhook.user_id),
+         :ok = ErrorTracking.put_context(user_id: webhook.user_id),
          :ok <- check_feature_access(webhook.user_id, webhook_id, event_type, feature),
-         {:ok, meeting} <- fetch_meeting(meeting_id, args["snapshot"]),
+         {:ok, meeting} <- fetch_meeting(meeting_id, args["participant_id"], args["snapshot"]),
          :ok <- deliver_once(webhook, event_type, meeting, job) do
       :ok
     else
@@ -133,17 +184,17 @@ defmodule Tymeslot.Workers.WebhookWorker do
        do: discard
 
   defp handle_delivery_error({:error, :not_found}, webhook_id, meeting_id, _event_type) do
-    Logger.warning("Webhook or meeting not found",
+    Logger.warning(@gone,
       webhook_id: webhook_id,
       meeting_id: meeting_id
     )
 
-    {:discard, "Webhook or meeting not found"}
+    {:discard, @gone}
   end
 
   defp handle_delivery_error({:error, :disabled}, webhook_id, _meeting_id, _event_type) do
     Logger.info("Webhook is disabled, discarding job", webhook_id: webhook_id)
-    {:discard, "Webhook is disabled"}
+    {:discard, @disabled}
   end
 
   defp handle_delivery_error({:error, :insufficient_plan}, webhook_id, _meeting_id, event_type) do
@@ -152,7 +203,7 @@ defmodule Tymeslot.Workers.WebhookWorker do
       event_type: event_type
     )
 
-    {:discard, "Insufficient plan"}
+    {:discard, @insufficient_plan}
   end
 
   defp handle_delivery_error(
@@ -175,7 +226,7 @@ defmodule Tymeslot.Workers.WebhookWorker do
       event_type: event_type
     )
 
-    {:discard, :blocked_by_ssrf}
+    {:discard, @blocked_by_ssrf}
   end
 
   defp handle_delivery_error({:error, :blocked_redirect}, webhook_id, _meeting_id, event_type) do
@@ -184,7 +235,7 @@ defmodule Tymeslot.Workers.WebhookWorker do
       event_type: event_type
     )
 
-    {:discard, :blocked_redirect}
+    {:discard, @blocked_redirect}
   end
 
   defp handle_delivery_error({:error, :too_many_redirects}, webhook_id, _meeting_id, event_type) do
@@ -193,7 +244,7 @@ defmodule Tymeslot.Workers.WebhookWorker do
       event_type: event_type
     )
 
-    {:discard, :too_many_redirects}
+    {:discard, @too_many_redirects}
   end
 
   defp handle_delivery_error(
@@ -207,7 +258,7 @@ defmodule Tymeslot.Workers.WebhookWorker do
       event_type: event_type
     )
 
-    {:discard, :redirect_missing_location}
+    {:discard, @redirect_missing_location}
   end
 
   defp handle_delivery_error({:error, reason} = error, webhook_id, _meeting_id, event_type) do
@@ -228,9 +279,21 @@ defmodule Tymeslot.Workers.WebhookWorker do
   `snapshot`, from `snapshot/1`, is what a retried delivery replays instead of
   re-deriving the meeting's current state; omit it (or pass `nil`) only where
   the event has no status-dependent payload section to protect.
+
+  `participant_id` names the seat of a group meeting the event is about (see
+  `Tymeslot.Meetings.SeatView`); the delivery then describes that seat's
+  booking. Each seat is its own delivery, so it is part of the uniqueness
+  key; a solo meeting passes `nil` and keeps the key it always had.
   """
-  @spec schedule_delivery(integer(), String.t(), binary(), map() | nil) :: :ok | {:error, term()}
-  def schedule_delivery(webhook_id, event_type, meeting_id, snapshot \\ nil) do
+  @spec schedule_delivery(integer(), String.t(), binary(), map() | nil, binary() | nil) ::
+          :ok | {:error, term()}
+  def schedule_delivery(
+        webhook_id,
+        event_type,
+        meeting_id,
+        snapshot \\ nil,
+        participant_id \\ nil
+      ) do
     result =
       %{
         "webhook_id" => webhook_id,
@@ -238,6 +301,7 @@ defmodule Tymeslot.Workers.WebhookWorker do
         "meeting_id" => meeting_id
       }
       |> maybe_put_snapshot(snapshot)
+      |> maybe_put_participant(participant_id)
       |> new(
         queue: :webhooks,
         priority: 2,
@@ -245,7 +309,7 @@ defmodule Tymeslot.Workers.WebhookWorker do
           # 5 minute uniqueness window
           period: 300,
           fields: [:args],
-          keys: [:webhook_id, :event_type, :meeting_id]
+          keys: unique_keys(participant_id)
         ]
       )
       |> Oban.insert()
@@ -286,6 +350,14 @@ defmodule Tymeslot.Workers.WebhookWorker do
 
   # Private functions
 
+  defp unique_keys(nil), do: [:webhook_id, :event_type, :meeting_id]
+  defp unique_keys(_participant_id), do: [:webhook_id, :event_type, :meeting_id, :participant_id]
+
+  defp maybe_put_participant(args, nil), do: args
+
+  defp maybe_put_participant(args, participant_id),
+    do: Map.put(args, "participant_id", participant_id)
+
   defp maybe_put_snapshot(args, nil), do: args
 
   defp maybe_put_snapshot(args, snapshot) when is_map(snapshot),
@@ -297,11 +369,49 @@ defmodule Tymeslot.Workers.WebhookWorker do
   # delivered on every attempt. `snapshot` is `nil` for jobs enqueued before
   # this was threaded through — those keep re-deriving from the live meeting,
   # same as before.
-  defp fetch_meeting(meeting_id, snapshot) do
-    with {:ok, meeting} <- MeetingQueries.get_meeting_with_guests(meeting_id) do
+  #
+  # A seat's delivery (`participant_id` set) describes that seat's booking:
+  # the participant as the attendee, their guests only, and the seat count
+  # the event fired with. The snapshot is replayed over the seat view, so a
+  # seat given up reads as cancelled with the time it was given up.
+  defp fetch_meeting(meeting_id, participant_id, snapshot) do
+    with {:ok, meeting} <- MeetingQueries.get_meeting_with_guests(meeting_id),
+         {:ok, meeting} <- maybe_seat_view(meeting, participant_id, snapshot) do
       {:ok, apply_snapshot(meeting, snapshot)}
     end
   end
+
+  defp maybe_seat_view(meeting, nil, _snapshot), do: {:ok, meeting}
+
+  defp maybe_seat_view(meeting, participant_id, snapshot) do
+    SeatView.load(
+      meeting,
+      participant_id,
+      snapshot_seats_taken(snapshot),
+      snapshot_previous_seat(snapshot)
+    )
+  end
+
+  defp snapshot_seats_taken(%{"seats_taken" => seats}) when is_integer(seats), do: seats
+  defp snapshot_seats_taken(_snapshot), do: nil
+
+  defp snapshot_previous_seat(%{
+         "previous_seat" => %{
+           "seat_id" => seat_id,
+           "meeting_id" => meeting_id,
+           "start_time" => start_time
+         }
+       }) do
+    case DateTime.from_iso8601(start_time) do
+      {:ok, start_time, _offset} ->
+        %{seat_id: seat_id, meeting_id: meeting_id, start_time: start_time}
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  defp snapshot_previous_seat(_snapshot), do: nil
 
   defp apply_snapshot(meeting, nil), do: meeting
 
@@ -440,7 +550,7 @@ defmodule Tymeslot.Workers.WebhookWorker do
         end
 
       {:error, reason} ->
-        Logger.warning("Failed to create webhook delivery log", error: inspect(reason))
+        Logger.warning("Failed to create webhook delivery log", error: LogFormat.reason(reason))
         {:error, :delivery_log_failed}
     end
   end
@@ -454,7 +564,7 @@ defmodule Tymeslot.Workers.WebhookWorker do
   # 401, 403 and 404 hard), already relied on by the integration health checks,
   # so the retry policy stays in one place instead of drifting per worker.
   defp http_failure(webhook, status, attempt) do
-    reason = "HTTP #{status}"
+    reason = "#{@http_status_prefix}#{status}"
 
     case ErrorAnalysis.classify_error({:http_error, status, reason}) do
       :transient ->

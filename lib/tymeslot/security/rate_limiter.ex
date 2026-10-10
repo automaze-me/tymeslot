@@ -295,6 +295,14 @@ defmodule Tymeslot.Security.RateLimiter do
   def check_guest_rsvp_rate_limit(client_ip), do: Bookings.check_guest_rsvp(client_ip)
 
   @doc """
+  Rate limit a group participant's seat-management pages and actions.
+  Returns :ok if allowed, {:error, :rate_limited, message} if exceeded.
+  """
+  @spec check_seat_manage_rate_limit(String.t()) ::
+          :ok | {:error, :rate_limited, String.t()}
+  def check_seat_manage_rate_limit(client_ip), do: Bookings.check_seat_manage(client_ip)
+
+  @doc """
   Rate limit meeting keep/uncancel attempts.
   Returns :ok if allowed, {:error, :rate_limited, message} if exceeded.
 
@@ -417,6 +425,18 @@ defmodule Tymeslot.Security.RateLimiter do
           :ok | {:error, :rate_limited, String.t()} | {:error, :invalid_user_id}
   def check_calendar_event_edit_rate_limit(user_id),
     do: Calendar.check_event_edit(user_id)
+
+  @doc """
+  Rate limit importing an `.ics` file into a calendar. Each import may write up
+  to a thousand events to the user's calendar provider.
+  Returns :ok if allowed, {:error, :rate_limited, message} if exceeded.
+
+  Limit: 5 imports per hour per user.
+  """
+  @spec check_calendar_ics_import_rate_limit(integer() | any()) ::
+          :ok | {:error, :rate_limited, String.t()} | {:error, :invalid_user_id}
+  def check_calendar_ics_import_rate_limit(user_id),
+    do: Calendar.check_ics_import(user_id)
 
   @doc """
   Rate limit moving events between calendars (delete + create).
@@ -545,6 +565,29 @@ defmodule Tymeslot.Security.RateLimiter do
   @spec check_dashboard_reschedule_rate_limit(integer() | any()) ::
           :ok | {:error, :rate_limited, String.t()} | {:error, :invalid_user_id}
   def check_dashboard_reschedule_rate_limit(user_id), do: Dashboard.check_reschedule(user_id)
+
+  @doc """
+  Rate limit the host inviting guests to an existing booking from the dashboard.
+  Returns :ok if allowed, {:error, :rate_limited, message} if exceeded.
+
+  Limit: 20 invitation batches per 10 minutes per user.
+  """
+  @spec check_dashboard_add_guests_rate_limit(integer() | any()) ::
+          :ok | {:error, :rate_limited, String.t()} | {:error, :invalid_user_id}
+  def check_dashboard_add_guests_rate_limit(user_id), do: Dashboard.check_add_guests(user_id)
+
+  @doc """
+  Rate limit creating an ad-hoc meeting from the calendar grid's quick add.
+  Each save emails the main guest and up to ten extra guests, so it gets the
+  same budget as inviting guests to an existing booking, in its own bucket.
+  Returns :ok if allowed, {:error, :rate_limited, message} if exceeded.
+
+  Limit: 20 meetings per 10 minutes per user.
+  """
+  @spec check_dashboard_quick_add_meeting_rate_limit(integer() | any()) ::
+          :ok | {:error, :rate_limited, String.t()} | {:error, :invalid_user_id}
+  def check_dashboard_quick_add_meeting_rate_limit(user_id),
+    do: Dashboard.check_quick_add_meeting(user_id)
 
   @doc """
   Rate limit payment initiation attempts.

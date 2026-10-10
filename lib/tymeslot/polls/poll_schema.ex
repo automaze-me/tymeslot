@@ -9,6 +9,8 @@ defmodule Tymeslot.Polls.PollSchema do
   alias Tymeslot.Meetings.MeetingSchema
   alias Tymeslot.MeetingTypes.MeetingTypeSchema
   alias Tymeslot.Polls.{PollParticipantSchema, PollTimeSlotSchema}
+  alias Tymeslot.Security.EncryptedString
+  alias Tymeslot.Security.Token
   alias Tymeslot.Utils.UnguessableToken
   alias Tymeslot.Validation.Constraints
 
@@ -24,7 +26,12 @@ defmodule Tymeslot.Polls.PollSchema do
     field(:title, :string)
     field(:description, :string)
     field(:duration_minutes, :integer)
-    field(:token, :string)
+    # The poll's public voting link, which the host copies from the
+    # dashboard again whenever they like, so it is encrypted rather than only
+    # hashed; it is looked up by `token_hash`. The plain `token` column
+    # predates this and is no longer read or written.
+    field(:token, EncryptedString, source: :token_encrypted, redact: true)
+    field(:token_hash, :string)
     field(:status, Ecto.Enum, values: [:open, :confirmed, :cancelled], default: :open)
     field(:deadline_at, :utc_datetime)
     field(:timezone, :string)
@@ -74,8 +81,10 @@ defmodule Tymeslot.Polls.PollSchema do
     |> validate_required([:user_id, :title, :duration_minutes, :timezone])
     |> validate_number(:duration_minutes, Constraints.poll_duration_minutes_opts())
     |> validate_length(:title, max: 255)
+    |> validate_description_length()
     |> put_new_token()
-    |> unique_constraint(:token)
+    |> Token.put_hash(:token, :token_hash)
+    |> unique_constraint(:token_hash)
     |> foreign_key_constraint(:user_id)
     |> foreign_key_constraint(:meeting_type_id)
   end
@@ -99,8 +108,13 @@ defmodule Tymeslot.Polls.PollSchema do
     |> update_change(:description, &trim_to_nil/1)
     |> validate_required([:title])
     |> validate_length(:title, max: 255)
-    |> validate_length(:description, max: 2000)
+    |> validate_description_length()
   end
+
+  # The description becomes the confirmed meeting's organiser note, so it is
+  # held to that limit from the start.
+  defp validate_description_length(changeset),
+    do: validate_length(changeset, :description, max: MeetingSchema.organizer_note_max_length())
 
   @spec confirm_changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
   def confirm_changeset(poll, attrs) do

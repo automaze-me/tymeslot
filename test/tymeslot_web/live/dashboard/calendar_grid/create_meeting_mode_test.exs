@@ -14,6 +14,8 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.CreateMeetingModeTest do
   import Tymeslot.Factory
 
   alias Plug.Test
+  alias Tymeslot.Meetings.MeetingSchema
+  alias Tymeslot.Repo
 
   setup %{conn: conn} do
     user = insert(:user, onboarding_completed_at: DateTime.utc_now())
@@ -41,6 +43,19 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.CreateMeetingModeTest do
       assert html =~ ~s(id="create-meeting-guest-email")
       # No mode toggle: an event has nowhere to be written.
       refute html =~ ~s(data-testid="create-mode-meeting")
+    end
+
+    test "puts Cancel before Create, as the confirmation dialogs do", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/dashboard")
+
+      labels =
+        lv
+        |> open_create_form()
+        |> Floki.parse_document!()
+        |> Floki.find("#create-event-modal .modal-footer button")
+        |> Enum.map(&String.trim(Floki.text(&1)))
+
+      assert labels == ["Cancel", "Create"]
     end
 
     test "saving without guest details flashes a validation error", %{conn: conn} do
@@ -127,6 +142,72 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.CreateMeetingModeTest do
       # The save dispatched to the async ad-hoc path and the button shows its
       # loading state while the meeting is created.
       assert html =~ "Creating..."
+    end
+  end
+
+  describe "the note to the guest" do
+    defp fill_guest(lv) do
+      lv
+      |> element("#calendar-grid")
+      |> render_hook("update_create_guest_name", %{"value" => "Ada Lovelace"})
+
+      lv
+      |> element("#calendar-grid")
+      |> render_hook("update_create_guest_email", %{"value" => "ada@example.com"})
+    end
+
+    test "is hidden until the organiser asks to add one", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/dashboard")
+      html = open_create_form(lv)
+
+      assert html =~ ~s(data-testid="create-meeting-add-note")
+      refute html =~ ~s(id="create-meeting-note")
+
+      html = lv |> element(~s([data-testid="create-meeting-add-note"])) |> render_click()
+
+      assert html =~ ~s(id="create-meeting-note")
+      refute html =~ ~s(data-testid="create-meeting-add-note")
+    end
+
+    test "is saved on the meeting the organiser creates", %{conn: conn, user: user} do
+      {:ok, lv, _html} = live(conn, ~p"/dashboard")
+      open_create_form(lv)
+      fill_guest(lv)
+
+      lv |> element(~s([data-testid="create-meeting-add-note"])) |> render_click()
+
+      lv
+      |> element("#calendar-grid")
+      |> render_hook("update_create_note", %{"value" => "Agenda: the Q3 roadmap."})
+
+      lv |> element("#calendar-grid") |> render_hook("save_event", %{})
+
+      # Creation runs in a supervised task; wait for the row it writes.
+      meeting = eventually(fn -> Repo.one(MeetingSchema) end, timeout: 5000)
+      assert meeting.organizer_user_id == user.id
+      assert meeting.organizer_note == "Agenda: the Q3 roadmap."
+      assert meeting.attendee_message == nil
+    end
+
+    test "removing it discards what was typed", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/dashboard")
+      open_create_form(lv)
+      fill_guest(lv)
+
+      lv |> element(~s([data-testid="create-meeting-add-note"])) |> render_click()
+
+      lv
+      |> element("#calendar-grid")
+      |> render_hook("update_create_note", %{"value" => "Never mind this."})
+
+      html = lv |> element("button", "Remove note") |> render_click()
+      refute html =~ ~s(id="create-meeting-note")
+
+      lv |> element("#calendar-grid") |> render_hook("save_event", %{})
+
+      # Creation runs in a supervised task; wait for the row it writes.
+      meeting = eventually(fn -> Repo.one(MeetingSchema) end, timeout: 5000)
+      assert meeting.organizer_note == nil
     end
   end
 
@@ -228,6 +309,29 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.CreateMeetingModeTest do
 
       assert html =~ ~s(id="create-event-modal")
       assert html =~ "Attendee email is required"
+    end
+
+    test "a time conflict flashes a sentence, not the reason atom", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/dashboard")
+      open_create_form(lv)
+
+      send(lv.pid, {:create_ad_hoc_meeting_result, {:error, :time_conflict}})
+      html = render(lv)
+
+      assert html =~ "You already have a meeting at this time."
+      refute html =~ "time_conflict"
+    end
+
+    test "an unrecognised reason flashes a generic sentence, never the raw term",
+         %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/dashboard")
+      open_create_form(lv)
+
+      send(lv.pid, {:create_ad_hoc_meeting_result, {:error, :queue_unavailable}})
+      html = render(lv)
+
+      assert html =~ "Failed to create appointment. Please try again."
+      refute html =~ "queue_unavailable"
     end
   end
 end

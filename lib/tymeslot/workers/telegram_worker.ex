@@ -30,31 +30,64 @@ defmodule Tymeslot.Workers.TelegramWorker do
 
   alias Tymeslot.Features
   alias Tymeslot.Infrastructure.AdminAlerts
+  alias Tymeslot.Infrastructure.ErrorTracking
+  alias Tymeslot.Infrastructure.ExpectedJobOutcome
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Meetings
+  alias Tymeslot.Meetings.SeatView
   alias Tymeslot.Notifications.Recipients
   alias Tymeslot.Telegram
   alias Tymeslot.Telegram.{API, MessageBuilder, TelegramIntegrationSchema, TelegramQueries}
   alias Tymeslot.Workers.DeliveryClaims
   alias Tymeslot.Workers.SnoozePolicy
 
+  @behaviour ExpectedJobOutcome
+
+  # The work no longer applies, or only the user can fix their bot or chat. A
+  # rejected shared bot token raises its own alert. Missing parameters, a
+  # missing shared token and endless rate limiting are recorded.
+  @gone "Integration or meeting not found"
+  @disabled "Integration is disabled"
+  @insufficient_plan "Insufficient plan"
+  @token_missing "Bot token missing"
+  @unauthorized "Unauthorized"
+  @bot_blocked "Bot blocked"
+  @bot_kicked "Bot kicked"
+  @chat_unreachable "Chat unreachable"
+
+  @impl ExpectedJobOutcome
+  def expected_outcome?(reason),
+    do:
+      reason in [
+        @gone,
+        @disabled,
+        @insufficient_plan,
+        @token_missing,
+        @unauthorized,
+        @bot_blocked,
+        @bot_kicked,
+        @chat_unreachable
+      ]
+
   @impl Oban.Worker
   def perform(
         %Oban.Job{
-          args: %{
-            "integration_id" => integration_id,
-            "event_type" => event_type,
-            "meeting_id" => meeting_id
-          },
+          args:
+            %{
+              "integration_id" => integration_id,
+              "event_type" => event_type,
+              "meeting_id" => meeting_id
+            } = args,
           attempt: attempt
         } = job
       ) do
     Logger.metadata(job_id: job.id, attempt: attempt)
 
     with {:ok, integration} <- TelegramQueries.get_integration(integration_id),
-         :ok = Logger.metadata(user_id: integration.user_id),
+         :ok = ErrorTracking.put_context(user_id: integration.user_id),
          :ok <- check_feature_access(integration.user_id),
          :ok <- check_active(integration),
-         {:ok, meeting} <- Meetings.get_meeting(meeting_id),
+         {:ok, meeting} <- fetch_meeting(meeting_id, args["participant_id"]),
          {:ok, token} <- Telegram.resolve_bot_token(integration) do
       timezone = Recipients.get_organizer_timezone(meeting)
       message = MessageBuilder.build_message(event_type, meeting, timezone)
@@ -65,13 +98,13 @@ defmodule Tymeslot.Workers.TelegramWorker do
       end)
     else
       {:error, :not_found} ->
-        {:discard, "Integration or meeting not found"}
+        {:discard, @gone}
 
       {:error, :disabled} ->
-        {:discard, "Integration is disabled"}
+        {:discard, @disabled}
 
       {:error, :insufficient_plan} ->
-        {:discard, "Insufficient plan"}
+        {:discard, @insufficient_plan}
 
       {:error, :feature_access_checker_failed} ->
         {:error, :feature_access_checker_failed}
@@ -80,7 +113,7 @@ defmodule Tymeslot.Workers.TelegramWorker do
         {:discard, "Shared bot token not configured"}
 
       {:error, :no_token} ->
-        {:discard, "Bot token missing"}
+        {:discard, @token_missing}
     end
   end
 
@@ -94,14 +127,24 @@ defmodule Tymeslot.Workers.TelegramWorker do
     {:discard, "Missing required parameters"}
   end
 
-  @spec schedule_delivery(integer(), String.t(), binary()) :: :ok | {:error, term()}
-  def schedule_delivery(integration_id, event_type, meeting_id) do
+  @doc """
+  Schedules a message for a meeting event.
+
+  `participant_id` names the seat of a group meeting the event is about (see
+  `Tymeslot.Meetings.SeatView`); the message then names that seat's
+  participant. Each seat is its own message, so it is part of the uniqueness
+  key; a solo meeting passes `nil` and keeps the key it always had.
+  """
+  @spec schedule_delivery(integer(), String.t(), binary(), binary() | nil) ::
+          :ok | {:error, term()}
+  def schedule_delivery(integration_id, event_type, meeting_id, participant_id \\ nil) do
     result =
       %{
         "integration_id" => integration_id,
         "event_type" => event_type,
         "meeting_id" => meeting_id
       }
+      |> maybe_put_participant(participant_id)
       |> new(
         queue: :telegram_messages,
         priority: 2,
@@ -112,7 +155,7 @@ defmodule Tymeslot.Workers.TelegramWorker do
           # coincide, so on args alone the two channels share one uniqueness
           # namespace and whichever inserts second is silently deduped away.
           fields: [:args, :worker],
-          keys: [:integration_id, :event_type, :meeting_id]
+          keys: unique_keys(participant_id)
         ]
       )
       |> Oban.insert()
@@ -127,6 +170,26 @@ defmodule Tymeslot.Workers.TelegramWorker do
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}) do
     min(round(:math.pow(2, attempt - 1)), 16)
+  end
+
+  defp unique_keys(nil), do: [:integration_id, :event_type, :meeting_id]
+
+  defp unique_keys(_participant_id),
+    do: [:integration_id, :event_type, :meeting_id, :participant_id]
+
+  defp maybe_put_participant(args, nil), do: args
+
+  defp maybe_put_participant(args, participant_id),
+    do: Map.put(args, "participant_id", participant_id)
+
+  # A seat's message (`participant_id` set) names that seat's participant,
+  # cancelled or not; a group meeting row has no attendee of its own.
+  defp fetch_meeting(meeting_id, nil), do: Meetings.get_meeting(meeting_id)
+
+  defp fetch_meeting(meeting_id, participant_id) do
+    with {:ok, meeting} <- Meetings.get_meeting(meeting_id) do
+      SeatView.load(meeting, participant_id, nil)
+    end
   end
 
   # Private functions
@@ -177,7 +240,7 @@ defmodule Tymeslot.Workers.TelegramWorker do
         :ok
 
       {:error, reason} ->
-        Logger.warning("Failed to create Telegram delivery log", error: inspect(reason))
+        Logger.warning("Failed to create Telegram delivery log", error: LogFormat.reason(reason))
     end
   end
 
@@ -222,7 +285,7 @@ defmodule Tymeslot.Workers.TelegramWorker do
   # to the operator instead and leave the integration active.
   defp handle_unauthorized(%TelegramIntegrationSchema{bot_mode: "own"} = integration) do
     auto_disable(integration, "invalid_token")
-    {:discard, "Unauthorized"}
+    {:discard, @unauthorized}
   end
 
   # Always reported, regardless of which attempt this is: this path always
@@ -240,7 +303,7 @@ defmodule Tymeslot.Workers.TelegramWorker do
       context: %{integration_id: integration.id, bot_mode: "shared"}
     )
 
-    {:discard, "Unauthorized"}
+    {:discard, @unauthorized}
   end
 
   defp auto_disable(integration, reason) do
@@ -251,7 +314,7 @@ defmodule Tymeslot.Workers.TelegramWorker do
       {:error, changeset} ->
         Logger.warning("Failed to auto-disable Telegram integration",
           integration_id: integration.id,
-          reason: inspect(changeset)
+          reason: LogFormat.reason(changeset)
         )
     end
   end
@@ -262,18 +325,18 @@ defmodule Tymeslot.Workers.TelegramWorker do
     cond do
       String.contains?(description, "bot was blocked by the user") ->
         auto_disable(integration, "bot_blocked")
-        {:discard, "Bot blocked"}
+        {:discard, @bot_blocked}
 
       String.contains?(description, "bot was kicked") ->
         auto_disable(integration, "bot_kicked")
-        {:discard, "Bot kicked"}
+        {:discard, @bot_kicked}
 
       migrate_to_chat_id = extract_migrate_to_chat_id(body) ->
         migrate_chat_id(integration, migrate_to_chat_id)
 
       permanently_unreachable?(description) ->
         auto_disable(integration, "chat_unreachable")
-        {:discard, "Chat unreachable"}
+        {:discard, @chat_unreachable}
 
       true ->
         if executions == 1,
@@ -305,7 +368,7 @@ defmodule Tymeslot.Workers.TelegramWorker do
       {:error, reason} ->
         Logger.warning("Failed to migrate Telegram chat id after supergroup upgrade",
           integration_id: integration.id,
-          reason: inspect(reason)
+          reason: LogFormat.reason(reason)
         )
     end
 

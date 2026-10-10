@@ -26,6 +26,7 @@ defmodule Tymeslot.Meetings.VideoRooms do
   require Logger
 
   alias Tymeslot.Auth.UserQueries
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Infrastructure.Logging.Redactor
   alias Tymeslot.Integrations.MeetingProvisioning
   alias Tymeslot.Integrations.Video
@@ -351,7 +352,7 @@ defmodule Tymeslot.Meetings.VideoRooms do
       {:error, reason} = error ->
         Logger.error("Failed to create video room",
           meeting_id: meeting.id,
-          reason: inspect(reason)
+          reason: LogFormat.reason(reason)
         )
 
         error
@@ -460,6 +461,28 @@ defmodule Tymeslot.Meetings.VideoRooms do
     end
   end
 
+  # A group meeting's participant link is handed to every seat holder (it is
+  # the one `attendee_video_url` on the slot), so it must name nobody: the
+  # slot row carries no attendee to name, and a link naming one booker would
+  # let the others enter as them. It is the shared link guests get, minted
+  # through the provider's identity-free path rather than by passing a nil
+  # name to `create_join_url/5`, which providers that put the name in the URL
+  # reject.
+  defp build_join_url(
+         %MeetingSchema{capacity: capacity} = meeting,
+         meeting_context,
+         "participant"
+       )
+       when capacity > 1 do
+    case video_module().shared_join_url(meeting_context, meeting.start_time) do
+      {:ok, url} when is_binary(url) -> {:ok, url}
+      {:ok, nil} -> {:error, :shared_join_url_unavailable}
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    error -> {:error, error}
+  end
+
   defp build_join_url(meeting, meeting_context, role) do
     {participant_name, participant_email} = get_participant_info(meeting, role)
 
@@ -509,7 +532,7 @@ defmodule Tymeslot.Meetings.VideoRooms do
     Logger.error("Failed to create secure join URL",
       room_ref: room_ref,
       role: role,
-      error: inspect(error)
+      error: LogFormat.reason(error)
     )
 
     case UrlValidation.validate_http_url(meeting_url) do

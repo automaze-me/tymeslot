@@ -12,19 +12,59 @@ defmodule Tymeslot.Meetings.SchedulingCompositionTest do
   @moduletag :meetings
   @moduletag :integration
 
+  import ExUnit.CaptureLog
+  import Tymeslot.ConfigTestHelpers
   import Tymeslot.Factory
 
   alias Ecto.UUID
+  alias ErrorTracker.Error
   alias Tymeslot.Meetings.Scheduling
 
   setup do
     user = insert(:user)
     profile = insert(:profile, user: user)
-    insert(:availability_schedule, profile: profile, is_default: true, buffer_minutes: 15)
+
+    insert(:availability_schedule,
+      profile: profile,
+      is_default: true,
+      buffer_before_minutes: 15,
+      buffer_after_minutes: 15
+    )
+
     %{user: user, profile: profile}
   end
 
   describe "create_meeting_with_conflict_check/1" do
+    test "records a database failure and returns :database_error", %{user: user} do
+      # Stands in for an outage: every insert into meetings fails. Created in
+      # the sandbox transaction, so rolled back with the test.
+      Repo.query!("""
+      CREATE FUNCTION fail_meeting_insert() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'meetings unavailable'; END;
+      $$ LANGUAGE plpgsql
+      """)
+
+      Repo.query!("""
+      CREATE TRIGGER fail_meeting_insert BEFORE INSERT ON meetings
+      FOR EACH ROW EXECUTE FUNCTION fail_meeting_insert()
+      """)
+
+      with_config(:error_tracker, enabled: true)
+
+      capture_log(fn ->
+        assert {:error, :database_error} =
+                 Scheduling.create_meeting_with_conflict_check(attrs(user, future_time(2, :day)))
+      end)
+
+      assert [%Error{kind: "Elixir.Postgrex.Error"} = error] =
+               Error |> Repo.all() |> Repo.preload(:occurrences)
+
+      assert [%{context: %{"operation" => "create", "organizer_user_id" => user_id}}] =
+               error.occurrences
+
+      assert user_id == user.id
+    end
+
     test "creates meeting when no conflicts exist", %{user: user} do
       start_time = future_time(2, :day)
 
@@ -107,7 +147,13 @@ defmodule Tymeslot.Meetings.SchedulingCompositionTest do
     test "does not see other users' meetings as conflicts", %{user: user} do
       other_user = insert(:user)
       other_profile = insert(:profile, user: other_user)
-      insert(:availability_schedule, profile: other_profile, is_default: true, buffer_minutes: 15)
+
+      insert(:availability_schedule,
+        profile: other_profile,
+        is_default: true,
+        buffer_before_minutes: 15,
+        buffer_after_minutes: 15
+      )
 
       base = future_time(2, :day)
       insert_meeting(other_user, base)
@@ -166,6 +212,71 @@ defmodule Tymeslot.Meetings.SchedulingCompositionTest do
 
   defp future_time(amount, unit) do
     DateTime.utc_now() |> DateTime.add(amount, unit) |> DateTime.truncate(:second)
+  end
+
+  describe "a venue deleted between resolving the booker's choice and the write" do
+    # The venue the booking resolved to, deleted before the meeting is
+    # written: the write must not fail on its foreign key.
+    defp deleted_venue(user) do
+      venue = insert(:venue, user: user, name: "Berlin office", description: "Friedrichstrasse 1")
+      Repo.delete!(venue)
+      venue
+    end
+
+    @at_venue %{
+      location: "Berlin office (Friedrichstrasse 1)",
+      location_kind: "in_person",
+      address_to_arrange: false
+    }
+
+    test "books the meeting without it, keeping the address it resolved to", %{user: user} do
+      venue = deleted_venue(user)
+
+      attrs =
+        user
+        |> attrs(future_time(2, :day))
+        |> Map.merge(@at_venue)
+        |> Map.put(:venue_id, venue.id)
+
+      assert {:ok, meeting} = Scheduling.create_meeting_with_conflict_check(attrs)
+
+      assert meeting.venue_id == nil
+      assert meeting.location == "Berlin office (Friedrichstrasse 1)"
+      assert meeting.address_to_arrange == false
+    end
+
+    test "moves the meeting without it, keeping the address it resolved to", %{user: user} do
+      venue = deleted_venue(user)
+      meeting = insert_meeting(user, future_time(2, :day))
+      new_start = future_time(5, :day)
+
+      assert {:ok, moved} =
+               Scheduling.update_meeting_with_conflict_check(
+                 meeting,
+                 Map.merge(@at_venue, %{
+                   start_time: new_start,
+                   end_time: DateTime.add(new_start, 30, :minute),
+                   venue_id: venue.id
+                 })
+               )
+
+      assert moved.venue_id == nil
+      assert moved.location == "Berlin office (Friedrichstrasse 1)"
+      assert DateTime.compare(moved.start_time, new_start) == :eq
+    end
+
+    test "keeps a venue that still exists", %{user: user} do
+      venue = insert(:venue, user: user, name: "Munich office")
+
+      attrs =
+        user
+        |> attrs(future_time(2, :day))
+        |> Map.merge(%{@at_venue | location: "Munich office"})
+        |> Map.put(:venue_id, venue.id)
+
+      assert {:ok, meeting} = Scheduling.create_meeting_with_conflict_check(attrs)
+      assert meeting.venue_id == venue.id
+    end
   end
 
   defp attrs(user, start_time) do

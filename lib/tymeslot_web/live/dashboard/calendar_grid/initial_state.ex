@@ -9,6 +9,7 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.InitialState do
   defaults so the template never reads an unset assign.
   """
 
+  alias Tymeslot.CalendarGrid.WriteQueue
   alias Tymeslot.Timezones
 
   @doc "The default assigns applied in the component's `mount/1`."
@@ -40,10 +41,18 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.InitialState do
       show_settings: false,
       show_shortcuts_help: false,
       creating_event: nil,
+      # The `.ics` import modal's state; see `EventHandlers.IcsImport`.
+      ics_import: nil,
       recurrence_prompt: nil,
+      # A move of a whole series awaiting confirmation; see `SeriesMove`.
+      series_move_prompt: nil,
       confirm_delete_event: nil,
+      confirm_delete_scopes: :single,
       confirm_delete_linked_to_booking: false,
       saving_event: false,
+      # Writes to existing events, serialised per event, and the series
+      # held while written whole or moved; see `EventWrites`.
+      event_writes: WriteQueue.new(),
       deleting_event: false,
       video_integrations: [],
       confirm_remove_attendee: nil,
@@ -55,6 +64,7 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.InitialState do
       owned_integration_ids: MapSet.new(),
       visible_events: [],
       guest_rsvp_summaries: %{},
+      group_booking_uids: MapSet.new(),
       visible_days: [],
       # Overwritten from the profile in `UpdateHandlers.handle_initial/2` before
       # the first render, on the static pass as much as the connected one. These

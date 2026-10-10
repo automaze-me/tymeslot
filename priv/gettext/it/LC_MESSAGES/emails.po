@@ -86,6 +86,7 @@ msgstr "MESSAGGIO DAL PARTECIPANTE:"
 msgid "Meeting"
 msgstr "Riunione"
 
+#: lib/tymeslot/integrations/calendar/calendar_event_builder.ex
 #: lib/tymeslot/integrations/calendar/utils/ics_generator.ex
 #, elixir-autogen, elixir-format
 msgid "Message from %{name}:"
@@ -491,3 +492,97 @@ msgstr "il single sign-on"
 #, elixir-autogen, elixir-format
 msgid "Confirm your email to finish signing up"
 msgstr "Conferma la tua email per completare la registrazione"
+
+#: lib/tymeslot/emails/templates/calendar_invitation.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has cancelled a recurring event you were invited to. Every occurrence is cancelled."
+msgstr "%{name} ha annullato un evento ricorrente a cui eri invitato. Tutte le ricorrenze sono annullate."
+
+#: lib/tymeslot/emails/templates/calendar_invitation.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has cancelled an event you were invited to."
+msgstr "%{name} ha annullato un evento a cui eri invitato."
+
+#: lib/tymeslot/emails/templates/calendar_invitation.ex
+#, elixir-autogen, elixir-format
+msgid "Cancelled"
+msgstr "Annullato"
+
+#: lib/tymeslot/emails/templates/calendar_invitation.ex
+#, elixir-autogen, elixir-format
+msgid "Cancelled - %{title} (every occurrence)"
+msgstr "Annullato - %{title} (tutte le ricorrenze)"
+
+#: lib/tymeslot/emails/templates/calendar_invitation.ex
+#, elixir-autogen, elixir-format
+msgid "Cancelled - %{title} on %{date}"
+msgstr "Annullato - %{title} il %{date}"
+
+#: lib/tymeslot/emails/templates/calendar_invitation.ex
+#, elixir-autogen, elixir-format
+msgid "Event Cancelled"
+msgstr "Evento annullato"
+
+#: lib/tymeslot/emails/shared/text_body_helper.ex
+#, elixir-autogen, elixir-format
+msgid "NOTE FROM THE ORGANISER:"
+msgstr "NOTA DALL’ORGANIZZATORE:"
+
+#: lib/tymeslot/emails/shared/meeting/notes.ex
+#, elixir-autogen, elixir-format
+msgid "Note from the organiser"
+msgstr "Nota dall’organizzatore"
+
+#: lib/tymeslot/bookings/booking_title.ex
+#, elixir-autogen, elixir-format
+msgid "%{meeting_type} with %{name}"
+msgstr "%{meeting_type} con %{name}"
+
+#: lib/tymeslot/bookings/demo_orchestrator.ex
+#, elixir-autogen, elixir-format
+msgid "Meeting with %{name}"
+msgstr "Riunione con %{name}"
+
+#: lib/tymeslot/emails/shared/formatting.ex
+#, elixir-autogen, elixir-format
+msgid "The address is to be arranged with the booker."
+msgstr "L'indirizzo è da concordare con la persona che ha prenotato."
+
+#: lib/tymeslot/emails/shared/formatting.ex
+#, elixir-autogen, elixir-format
+msgid "The address will be arranged after booking."
+msgstr "L'indirizzo verrà concordato dopo la prenotazione."
+
+#: lib/tymeslot/emails/shared/formatting.ex
+#, elixir-autogen, elixir-format
+msgid "The address will be arranged with you after booking."
+msgstr "L'indirizzo verrà concordato con te dopo la prenotazione."
+
+#: lib/tymeslot/emails/appointment_builder.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} participant"
+msgid_plural "%{count} participants"
+msgstr[0] "%{count} partecipante"
+msgstr[1] "%{count} partecipanti"
+
+#: lib/tymeslot/integrations/calendar/calendar_event_builder.ex
+#, elixir-autogen, elixir-format
+msgid "Attendees (%{count}):"
+msgstr "Partecipanti (%{count}):"
+
+#: lib/tymeslot/emails/shared/text_body_helper.ex
+#, elixir-autogen, elixir-format
+msgid "Open in dashboard:"
+msgstr "Apri nella dashboard:"
+
+#: lib/tymeslot/emails/shared/group_session.ex
+#, elixir-autogen, elixir-format
+msgid "Group session: you have one of %{count} spot."
+msgid_plural "Group session: you have one of %{count} spots."
+msgstr[0] "Sessione di gruppo: hai uno dei %{count} posti."
+msgstr[1] "Sessione di gruppo: hai uno dei %{count} posti."
+
+#: lib/tymeslot/emails/shared/formatting.ex
+#, elixir-autogen, elixir-format
+msgid "ends %{time} on %{date}"
+msgstr "fine: %{date}, %{time}"

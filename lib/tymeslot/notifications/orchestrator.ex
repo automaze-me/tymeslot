@@ -9,9 +9,17 @@ defmodule Tymeslot.Notifications.Orchestrator do
   alias Tymeslot.Clock
   alias Tymeslot.Emails.EmailScheduler
   alias Tymeslot.Infrastructure.Config
+  alias Tymeslot.Infrastructure.Logging.LogFormat
+  alias Tymeslot.Meetings
   alias Tymeslot.Meetings.ApprovalJobs
-  alias Tymeslot.Notifications.{ContentBuilder, GuestNotifications, Recipients, SchedulingRules}
-  alias Tymeslot.Utils.ReminderUtils
+
+  alias Tymeslot.Notifications.{
+    ContentBuilder,
+    GuestNotifications,
+    Recipients,
+    ReminderSchedule,
+    SchedulingRules
+  }
 
   @doc """
   Schedules all notifications for a newly created meeting.
@@ -31,7 +39,7 @@ defmodule Tymeslot.Notifications.Orchestrator do
       {:error, reason} = error ->
         Logger.error("Failed to schedule meeting notifications",
           meeting_id: meeting.id,
-          reason: inspect(reason)
+          reason: LogFormat.reason(reason)
         )
 
         error
@@ -76,7 +84,7 @@ defmodule Tymeslot.Notifications.Orchestrator do
         Logger.error("Failed to schedule booking request notification step",
           meeting_id: meeting.id,
           step: step,
-          reason: inspect(reason)
+          reason: LogFormat.reason(reason)
         )
 
         {step, reason}
@@ -145,7 +153,7 @@ defmodule Tymeslot.Notifications.Orchestrator do
     content = ContentBuilder.build_appointment_details(meeting)
 
     with :ok <- Recipients.validate_recipients(recipients),
-         :ok <- ContentBuilder.validate_content(content),
+         :ok <- ContentBuilder.validate_content(content, Meetings.group?(meeting)),
          result <- schedule_confirmation_job(meeting.id) do
       case result do
         :ok -> :ok
@@ -161,26 +169,16 @@ defmodule Tymeslot.Notifications.Orchestrator do
   @spec schedule_reminder_notifications(%{atom() => term()}) ::
           :ok | {:ok, atom()} | {:error, term()}
   def schedule_reminder_notifications(meeting) do
-    reminders =
-      case Map.get(meeting, :reminders) do
-        nil ->
-          # Legacy meetings without reminders field - derive from legacy fields
-          legacy_label = meeting.reminder_time || meeting.default_reminder_time || "30 minutes"
-          value = ReminderUtils.parse_reminder_value(legacy_label)
-          unit = ReminderUtils.normalize_reminder_unit(legacy_label)
-          [%{value: value, unit: unit}]
-
-        reminder_list ->
-          normalized = normalize_reminders(reminder_list)
-          # Respect empty list as "no reminders" - only default when nil
-          normalized
-      end
+    # `ReminderSchedule` is the single reader of the meeting's reminder column,
+    # legacy shapes included, so what a surface shows a booking reminds with is
+    # what is scheduled here.
+    reminders = ReminderSchedule.configured(meeting)
 
     recipients = Recipients.determine_recipients(meeting, :reminder)
     content = ContentBuilder.build_reminder_details(meeting)
 
     with :ok <- Recipients.validate_recipients(recipients),
-         :ok <- ContentBuilder.validate_content(content) do
+         :ok <- ContentBuilder.validate_content(content, Meetings.group?(meeting)) do
       {result, scheduled_any?} = schedule_reminders(meeting, reminders)
 
       case {result, scheduled_any?} do
@@ -222,6 +220,63 @@ defmodule Tymeslot.Notifications.Orchestrator do
         :ok -> {:ok, :cancellation_scheduled}
         {:error, reason} -> {:error, reason}
       end
+    end
+  end
+
+  @doc """
+  Schedules the confirmation email job for one seat on a group meeting.
+  """
+  @spec schedule_seat_confirmation(%{atom() => term()}, %{atom() => term()}) ::
+          {:ok, atom()} | {:error, term()}
+  def schedule_seat_confirmation(meeting, participant) do
+    worker_module = get_email_worker_module()
+
+    case worker_module.schedule_seat_confirmation_emails(meeting.id, participant.id) do
+      :ok -> {:ok, :seat_confirmation_scheduled}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Schedules the cancellation email job for one seat on a group meeting.
+  """
+  @spec schedule_seat_cancellation(%{atom() => term()}, %{atom() => term()}, boolean()) ::
+          {:ok, atom()} | {:error, term()}
+  def schedule_seat_cancellation(meeting, participant, slot_freed?) do
+    worker_module = get_email_worker_module()
+
+    case worker_module.schedule_seat_cancellation_emails(
+           meeting.id,
+           participant.id,
+           slot_freed?
+         ) do
+      :ok -> {:ok, :seat_cancellation_scheduled}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Schedules the reschedule email job for one seat on a group meeting:
+  `participant` is the seat at its new time, `old_participant` the seat it
+  moved from.
+  """
+  @spec schedule_seat_reschedule(
+          %{atom() => term()},
+          %{atom() => term()},
+          %{atom() => term()},
+          boolean()
+        ) :: {:ok, atom()} | {:error, term()}
+  def schedule_seat_reschedule(meeting, participant, old_participant, old_slot_freed?) do
+    worker_module = get_email_worker_module()
+
+    case worker_module.schedule_seat_reschedule_emails(
+           meeting.id,
+           participant.id,
+           old_participant.id,
+           old_slot_freed?
+         ) do
+      :ok -> {:ok, :seat_reschedule_scheduled}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -390,8 +445,8 @@ defmodule Tymeslot.Notifications.Orchestrator do
 
       {organizer_result, attendee_result} ->
         Logger.warning("Some reschedule emails may have failed",
-          organizer_result: inspect(organizer_result),
-          attendee_result: inspect(attendee_result)
+          organizer_result: LogFormat.reason(organizer_result),
+          attendee_result: LogFormat.reason(attendee_result)
         )
 
         {:ok, :reschedules_partially_sent}
@@ -401,10 +456,6 @@ defmodule Tymeslot.Notifications.Orchestrator do
   # Module getters for dependency injection in tests
   defp get_email_worker_module do
     Application.get_env(:tymeslot, :email_worker_module, Tymeslot.Emails.EmailScheduler)
-  end
-
-  defp normalize_reminders(reminders) do
-    ReminderUtils.normalize_reminders(reminders)
   end
 
   defp schedule_reminders(meeting, reminders) do

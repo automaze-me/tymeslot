@@ -18,6 +18,7 @@ defmodule Tymeslot.Emails.Shared.TextBodyHelper do
         "#{dgettext("emails", "Date:")} #{Formatting.format_date(appointment_details.date, locale)}",
         format_time_line(appointment_details, locale),
         format_location_line(appointment_details),
+        Formatting.location_note(appointment_details),
         format_meeting_type_line(appointment_details.meeting_type)
       ]
 
@@ -25,6 +26,20 @@ defmodule Tymeslot.Emails.Shared.TextBodyHelper do
       |> Enum.filter(& &1)
       |> Enum.join("\n")
     end)
+  end
+
+  @doc """
+  The note under an in-person location whose address is arranged after
+  booking, as a line of its own to append straight to a text body's location
+  line; empty for any other location.
+  Must be called within a `Gettext.with_locale` block.
+  """
+  @spec location_note_line(map()) :: String.t()
+  def location_note_line(details) do
+    case Formatting.location_note(details) do
+      nil -> ""
+      note -> "\n" <> note
+    end
   end
 
   @doc """
@@ -67,6 +82,16 @@ defmodule Tymeslot.Emails.Shared.TextBodyHelper do
           links
         end
 
+      links =
+        if appointment_details[:dashboard_url] do
+          [
+            "#{dgettext("emails", "Open in dashboard:")} #{appointment_details.dashboard_url}"
+            | links
+          ]
+        else
+          links
+        end
+
       if Enum.empty?(links) do
         ""
       else
@@ -78,6 +103,21 @@ defmodule Tymeslot.Emails.Shared.TextBodyHelper do
       end
     end)
   end
+
+  @doc """
+  The organiser's note to the guest, as a plain-text block, or `""` when the
+  meeting carries none.
+  """
+  @spec format_organizer_note(Tymeslot.Emails.EmailService.appointment_details(), String.t()) ::
+          String.t()
+  def format_organizer_note(%{organizer_note: note}, locale)
+      when is_binary(note) and note != "" do
+    Gettext.with_locale(TymeslotWeb.Gettext, locale, fn ->
+      "\n\n#{dgettext("emails", "NOTE FROM THE ORGANISER:")}\n\"#{note}\""
+    end)
+  end
+
+  def format_organizer_note(_appointment_details, _locale), do: ""
 
   @doc """
   Formats attendee information for text body.
@@ -161,7 +201,17 @@ defmodule Tymeslot.Emails.Shared.TextBodyHelper do
       time_format = Map.get(appointment_details, :time_format)
       time_str = Formatting.format_time(appointment_details[time_key], locale, time_format)
       duration_str = Formatting.format_duration(appointment_details.duration, locale)
-      "#{dgettext("emails", "Time:")} #{time_str} (#{duration_str})"
+      line = "#{dgettext("emails", "Time:")} #{time_str} (#{duration_str})"
+
+      case Formatting.format_next_day_end(
+             appointment_details[time_key],
+             appointment_details.duration,
+             locale,
+             time_format
+           ) do
+        nil -> line
+        note -> "#{line}, #{note}"
+      end
     end
   end
 

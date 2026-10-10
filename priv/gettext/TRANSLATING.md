@@ -78,7 +78,7 @@ rewrites it as `# `/`# #`; that is corruption, and it has landed in this repo be
 
 ## Plural forms
 
-Most languages have two forms. Ukrainian and Czech have three. Every plural entry must carry exactly as many `msgstr[n]` lines as its file's `nplurals`.
+Most languages have two forms. Ukrainian, Czech and Polish have three. Every plural entry must carry exactly as many `msgstr[n]` lines as its file's `nplurals`.
 
 ```po
 # de, fr, it — nplurals=2
@@ -91,6 +91,11 @@ msgstr[1] "Stunden"  # everything else, including 0
 msgstr[0] "хвилина"  # n mod 10 == 1 and n mod 100 != 11
 msgstr[1] "хвилини"  # n mod 10 in 2..4
 msgstr[2] "хвилин"   # everything else
+
+# pl — nplurals=3
+msgstr[0] "godzina"  # n == 1
+msgstr[1] "godziny"  # n mod 10 in 2..4 and n mod 100 not in 12..14
+msgstr[2] "godzin"   # everything else
 ```
 
 ## Domains
@@ -168,6 +173,11 @@ already English.
 So the order of work for a new language is: translate every catalogue, *then* add the locale to
 the config. Adding it first turns the suite red, which is the point — the alternative is shipping
 a language switcher that quietly serves English.
+
+The comment above `config :tymeslot, :locales` lists everything else a new locale needs: the
+per-locale formatting code, and any application built on this repository that keeps its own
+translated content and reads the same list. Use a bare language code (`pt`, not `pt_BR`);
+region tags never reach the locale resolver.
 
 ## Locale resolution
 

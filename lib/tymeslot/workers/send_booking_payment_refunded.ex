@@ -30,13 +30,26 @@ defmodule Tymeslot.Workers.SendBookingPaymentRefunded do
 
   require Logger
 
+  alias Tymeslot.Bookings.BookingTitle
   alias Tymeslot.Emails.Templates.BookingPaymentRefunded
   alias Tymeslot.Emails.Templates.BookingPaymentRefunded.RefundContext
+  alias Tymeslot.Infrastructure.ExpectedJobOutcome
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.MeetingPayments
   alias Tymeslot.MeetingPayments.BookingPaymentSchema
   alias Tymeslot.Meetings.MeetingQueries
   alias Tymeslot.Workers.DeliveryClaims
   alias Tymeslot.Workers.TransactionalEmailDelivery
+
+  @behaviour ExpectedJobOutcome
+
+  # The payment is gone, or the recipient already raised its own alert;
+  # missing ids and a payment without an attendee email are recorded.
+  @payment_gone "booking_payment not found"
+
+  @impl ExpectedJobOutcome
+  def expected_outcome?(reason),
+    do: reason in [@payment_gone] or TransactionalEmailDelivery.recipient_rejected?(reason)
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"booking_payment_id" => booking_payment_id}} = job) do
@@ -46,7 +59,7 @@ defmodule Tymeslot.Workers.SendBookingPaymentRefunded do
           booking_payment_id: booking_payment_id
         )
 
-        {:discard, "booking_payment not found"}
+        {:discard, @payment_gone}
 
       %BookingPaymentSchema{refunded_amount_cents: 0} ->
         Logger.info("Refund email skipped — no refund recorded on booking_payment",
@@ -62,7 +75,7 @@ defmodule Tymeslot.Workers.SendBookingPaymentRefunded do
 
   def perform(%Oban.Job{args: args}) do
     Logger.error("SendBookingPaymentRefunded missing booking_payment_id",
-      args: inspect(args)
+      args: LogFormat.reason(args)
     )
 
     {:discard, "missing booking_payment_id"}
@@ -120,7 +133,10 @@ defmodule Tymeslot.Workers.SendBookingPaymentRefunded do
     end
   end
 
-  defp meeting_title(%{title: title}, _payment) when is_binary(title) and title != "", do: title
+  # The refund notice goes to the booker, so the title is in their language.
+  defp meeting_title(%{title: title} = meeting, _payment) when is_binary(title) and title != "",
+    do: BookingTitle.localise(meeting, locale_for(meeting))
+
   defp meeting_title(_meeting, %{meeting_type_name: name}) when is_binary(name), do: name
   defp meeting_title(_meeting, _payment), do: nil
 

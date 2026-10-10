@@ -4,6 +4,11 @@ defmodule Tymeslot.CalendarGrid.EventVideoTest do
   one of the organiser's video integrations, or removes its link, on both the
   provider event and the cached row.
 
+  Covers choosing an integration and removing one. A token-bearing provider
+  link, a series recovering a room it already has, and the description
+  helper underneath both are covered by the sibling
+  `EventVideoLinkRecoveryTest`.
+
   The video provider is reached through its real adapter with HTTP stubbed at
   `Tymeslot.HTTPClientMock` (MiroTalk for creation, Zoom where the queued
   delete of a room is run); the calendar write is stubbed at
@@ -21,9 +26,7 @@ defmodule Tymeslot.CalendarGrid.EventVideoTest do
 
   import Mox
 
-  alias Joken.Signer
   alias Tymeslot.CalendarGrid
-  alias Tymeslot.CalendarGrid.EventVideo
   alias Tymeslot.Infrastructure.Logging.Redactor
   alias Tymeslot.Integrations.Calendar.ProviderCalendarEventQueries
   alias Tymeslot.Integrations.Video.Providers.LinkRoom
@@ -35,25 +38,20 @@ defmodule Tymeslot.CalendarGrid.EventVideoTest do
 
   @new_url "https://video.example.com/join/room-123"
   @old_url "https://video.example.com/join/old-room"
-  # A custom video link, and one MiroTalk's "/join/" pattern claims: MiroTalk
-  # is listed first, so guessing the provider from the URL parses the room id
-  # as its last path segment. The custom provider derives it from the whole
-  # URL instead, and that digest is the id the room was created under.
+  # A custom video link, and one MiroTalk's "/join/" pattern also claims:
+  # MiroTalk is listed first, so guessing the provider from the URL would
+  # treat it as a MiroTalk room. The event's own integration names it custom.
   @custom_url "https://whereby.com/join/team-standup"
-  @custom_room_id "176c39fdfe37cdea"
   @reminders [%{"method" => "popup", "minutes_before" => 15}]
   @rrule "FREQ=WEEKLY;BYDAY=MO"
-  @app_id "tymeslot"
-  @secret "grid-shared-secret-of-at-least-32-bytes-long"
-  @jitsi_server "https://meet.example.com"
 
   setup do
     user = insert(:user)
 
-    # Google, so that the repeating fixture below stays editable: a CalDAV
-    # series is written through its master VEVENT and every edit of one
-    # occurrence is refused (`CalendarGrid.ensure_editable/1`). The one test
-    # that needs CalDAV's offline queue brings its own integration.
+    # Google, so that the repeating fixture below takes the ordinary write: an
+    # occurrence of a CalDAV series is written as an override of its own
+    # (`Tymeslot.CalendarGrid.SeriesEdit`). The one test that needs CalDAV's
+    # offline queue brings its own integration.
     integration = insert(:calendar_integration, user: user, provider: "google")
 
     video_integration = insert(:video_integration, user: user, provider: "mirotalk")
@@ -486,120 +484,5 @@ defmodule Tymeslot.CalendarGrid.EventVideoTest do
       oauth_scope: "meeting:write:meeting meeting:delete:meeting",
       provider_account_id: nil
     )
-  end
-
-  # A grid event mints no per-participant link: the description is one piece
-  # of text every reader of the event shares. Handed the bare room URL, a
-  # Jitsi server enforcing tokens refuses everybody the event reaches, the
-  # organiser included, so the link published here carries a token instead —
-  # one that names nobody and confers no moderator rights.
-  describe "change_event_video/3 on a provider whose links carry a token" do
-    test "publishes a tokenised link in the description and on the cached row", %{
-      user: user,
-      integration: integration
-    } do
-      event = insert_event(integration)
-      jitsi = insert_jitsi_integration(user)
-      expect_provider_update(:ok)
-
-      assert {:ok, url} = CalendarGrid.change_event_video(user.id, event, jitsi.id)
-
-      {:ok, room_id} = LinkRoom.slug(event.uid)
-      assert String.starts_with?(url, @jitsi_server <> "/" <> room_id <> "?jwt=")
-
-      assert reload(event).video_link == url
-
-      assert_received {:provider_update, _uid, payload}
-      assert payload.description =~ "Join video call: " <> url
-    end
-
-    test "publishes a token naming nobody, scoped to the room and not a moderator", %{
-      user: user,
-      integration: integration
-    } do
-      event = insert_event(integration)
-      jitsi = insert_jitsi_integration(user)
-      expect_provider_update(:ok)
-
-      assert {:ok, url} = CalendarGrid.change_event_video(user.id, event, jitsi.id)
-
-      {:ok, room_id} = LinkRoom.slug(event.uid)
-      claims = verified_claims(url)
-
-      assert claims["context"]["user"] == %{"moderator" => false}
-      assert claims["room"] == room_id
-      assert claims["exp"] == DateTime.to_unix(event.start_at) + 4 * 60 * 60
-    end
-  end
-
-  describe "put_join_link/3" do
-    test "names the link on an event that had none" do
-      assert EventVideo.put_join_link("Agenda", nil, "https://v.example/a") ==
-               "Agenda\n\nJoin video call: https://v.example/a"
-    end
-
-    test "is the whole description when the event had none" do
-      for empty <- [nil, ""] do
-        assert EventVideo.put_join_link(empty, nil, "https://v.example/a") ==
-                 "Join video call: https://v.example/a"
-      end
-    end
-
-    test "replaces the previous link rather than stacking a second one" do
-      description = "Agenda\n\nJoin video call: https://old.example/a"
-
-      assert EventVideo.put_join_link(
-               description,
-               "https://old.example/a",
-               "https://new.example/b"
-             ) ==
-               "Agenda\n\nJoin video call: https://new.example/b"
-    end
-
-    test "takes the line out of the middle of the organiser's own text" do
-      description = "Agenda\n\nJoin video call: https://old.example/a\n\nBring notes"
-
-      assert EventVideo.put_join_link(description, "https://old.example/a", nil) ==
-               "Agenda\n\nBring notes"
-    end
-
-    test "leaves the description alone when removing a link it never named" do
-      assert EventVideo.put_join_link("Agenda", "https://old.example/a", nil) == "Agenda"
-    end
-
-    test "leaves nothing behind when the line was the whole description" do
-      assert EventVideo.put_join_link(
-               "Join video call: https://old.example/a",
-               "https://old.example/a",
-               nil
-             ) == ""
-    end
-
-    test "does not treat a link the organiser wrote themselves as ours" do
-      description = "Agenda\n\nSee https://old.example/a for the room"
-
-      assert EventVideo.put_join_link(description, "https://old.example/a", nil) == description
-    end
-  end
-
-  defp insert_jitsi_integration(user) do
-    insert(:video_integration,
-      user: user,
-      name: "Our Jitsi",
-      provider: "jitsi",
-      base_url: @jitsi_server,
-      client_id_encrypted: Encryption.encrypt(@app_id),
-      client_secret_encrypted: Encryption.encrypt(@secret)
-    )
-  end
-
-  # Verifying against the configured secret, rather than only decoding the
-  # payload, also proves the token is signed with it.
-  defp verified_claims(url) do
-    %URI{query: query} = URI.parse(url)
-    %{"jwt" => token} = URI.decode_query(query)
-
-    assert {:ok, claims} = Joken.verify(token, Signer.create("HS256", @secret))
-    claims
   end
 end

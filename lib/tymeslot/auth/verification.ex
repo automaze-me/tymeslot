@@ -9,6 +9,7 @@ defmodule Tymeslot.Auth.Verification do
   alias Tymeslot.Auth.Helpers.AccountLogging
   alias Tymeslot.Emails.EmailScheduler
   alias Tymeslot.Infrastructure.Config
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Repo
   alias Tymeslot.Security.{RateLimiter, SecurityLogger, Token}
   alias Tymeslot.Utils.UrlBuilder
@@ -49,7 +50,8 @@ defmodule Tymeslot.Auth.Verification do
   end
 
   # Returns the user as the token found them (still carrying `signup_ip`)
-  # alongside the verified user. The token's row is locked while it is
+  # alongside the verified user, whose `signup_ip` verification has cleared:
+  # the same-device check must read the former. The token's row is locked while it is
   # spent, so two clicks on the same link cannot both verify.
   defp verify_by_token(token) do
     result =
@@ -204,7 +206,7 @@ defmodule Tymeslot.Auth.Verification do
     with {:error, reason} <- send_verification_email(user, ip_address) do
       Logger.error("Verification link after sign-in failed",
         user_id: user.id,
-        reason: inspect(reason)
+        reason: LogFormat.reason(reason)
       )
     end
 
@@ -230,7 +232,10 @@ defmodule Tymeslot.Auth.Verification do
       [event: "email_verification", identifier: user.id, ip: ip],
       fn ->
         with {:error, reason} <- issue_and_send(user, ip) do
-          Logger.error("Verification resend failed", user_id: user.id, reason: inspect(reason))
+          Logger.error("Verification resend failed",
+            user_id: user.id,
+            reason: LogFormat.reason(reason)
+          )
         end
       end
     )
@@ -248,7 +253,7 @@ defmodule Tymeslot.Auth.Verification do
         {:ok, updated_user}
 
       {:error, reason} = error ->
-        Logger.error("Email verification failed", reason: inspect(reason))
+        Logger.error("Email verification failed", reason: LogFormat.reason(reason))
         # The token resolved and had not expired, only the update failed, so
         # the token may still be valid and unconsumed.
         AccountLogging.log_operation_failure("email_verification", user.id, reason)
@@ -322,7 +327,7 @@ defmodule Tymeslot.Auth.Verification do
       {:error, reason} ->
         Logger.error("Failed to schedule verification email",
           user_id: user.id,
-          reason: inspect(reason)
+          reason: LogFormat.reason(reason)
         )
 
         {:error, reason}

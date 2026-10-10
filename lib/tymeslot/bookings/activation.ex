@@ -22,6 +22,7 @@ defmodule Tymeslot.Bookings.Activation do
 
   require Logger
 
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Integrations.Video
   alias Tymeslot.Integrations.Video.ProviderConfig, as: VideoProviderConfig
   alias Tymeslot.Meetings.MeetingSchema, as: Meeting
@@ -83,7 +84,7 @@ defmodule Tymeslot.Bookings.Activation do
       {:error, reason} ->
         Logger.error("Failed to schedule booking request emails",
           meeting_id: meeting.id,
-          error: inspect(reason)
+          error: LogFormat.reason(reason)
         )
 
         :ok
@@ -98,11 +99,25 @@ defmodule Tymeslot.Bookings.Activation do
     end
   end
 
+  @doc """
+  True when the meeting's video provider creates its room through an API, so
+  the confirmation emails are worth holding until the join link exists.
+
+  Public because the group-booking path
+  (`Tymeslot.Bookings.SeatEffects`) faces the same question for the first
+  seat on a slot, and must not answer it from a second copy of
+  `@api_created_providers`.
+  """
+  @spec api_created_video_room?(Meeting.t()) :: boolean()
+  def api_created_video_room?(%Meeting{} = meeting) do
+    match?({:ok, provider} when provider in @api_created_providers, video_provider_for(meeting))
+  end
+
   defp wants_video_room?(meeting, opts) do
     if Keyword.get(opts, :with_video_room, false) do
       not is_nil(meeting.video_integration_id)
     else
-      match?({:ok, provider} when provider in @api_created_providers, video_provider_for(meeting))
+      api_created_video_room?(meeting)
     end
   end
 
@@ -121,7 +136,7 @@ defmodule Tymeslot.Bookings.Activation do
       {:error, reason} ->
         Logger.error("Failed to schedule confirmation emails for meeting",
           meeting_id: meeting.id,
-          error: inspect(reason)
+          error: LogFormat.reason(reason)
         )
 
         :ok

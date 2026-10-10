@@ -11,6 +11,7 @@ defmodule Tymeslot.Meetings.Listing do
   require Logger
 
   alias Tymeslot.Auth.UserQueries
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Meetings.MeetingListQueries
   alias Tymeslot.Pagination.CursorPage
 
@@ -85,7 +86,13 @@ defmodule Tymeslot.Meetings.Listing do
         # "past" honestly once `end_time` catches up, same as any other
         # meeting that has run its course.
         "upcoming" ->
-          [time_filter: :upcoming, exclude_status: ["cancelled", "awaiting_approval", "expired"]]
+          [
+            time_filter: :upcoming,
+            exclude_status: ["cancelled", "awaiting_approval", "expired"],
+            # Soonest first, the order a host works through them; every
+            # other list stays newest first.
+            order: :asc
+          ]
 
         "past" ->
           [time_filter: :past, exclude_status: "cancelled"]
@@ -117,7 +124,7 @@ defmodule Tymeslot.Meetings.Listing do
     error ->
       Logger.error("Exception while listing meetings by filter",
         user_id: user_id,
-        error: inspect(error),
+        error: LogFormat.reason(error),
         stacktrace: __STACKTRACE__
       )
 
@@ -131,6 +138,7 @@ defmodule Tymeslot.Meetings.Listing do
     time_filter = Keyword.get(opts, :time_filter)
     after_start = Keyword.get(opts, :after_start)
     after_id = Keyword.get(opts, :after_id)
+    order = Keyword.get(opts, :order, :desc)
 
     MeetingListQueries.list_meetings_for_user_paginated_cursor(user_email,
       per_page: per_page,
@@ -138,7 +146,8 @@ defmodule Tymeslot.Meetings.Listing do
       exclude_status: exclude_status,
       time_filter: time_filter,
       after_start: after_start,
-      after_id: after_id
+      after_id: after_id,
+      order: order
     )
   end
 

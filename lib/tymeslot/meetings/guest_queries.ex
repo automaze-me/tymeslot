@@ -12,6 +12,7 @@ defmodule Tymeslot.Meetings.GuestQueries do
   alias Tymeslot.Meetings.GuestSchema, as: Guest
   alias Tymeslot.Meetings.MeetingSchema, as: Meeting
   alias Tymeslot.Repo
+  alias Tymeslot.Security.Token
 
   @doc "Inserts a single guest for a meeting."
   @spec insert_guest(map()) :: {:ok, Guest.t()} | {:error, Changeset.t()}
@@ -24,7 +25,7 @@ defmodule Tymeslot.Meetings.GuestQueries do
   @doc "Fetches a guest by its RSVP token."
   @spec get_by_token(String.t()) :: {:ok, Guest.t()} | {:error, :not_found}
   def get_by_token(token) when is_binary(token) do
-    case Repo.get_by(Guest, rsvp_token: token) do
+    case Repo.get_by(Guest, rsvp_token_hash: Token.hash_token(token)) do
       nil -> {:error, :not_found}
       guest -> {:ok, guest}
     end
@@ -39,6 +40,25 @@ defmodule Tymeslot.Meetings.GuestQueries do
   def list_for_meeting(meeting_id) do
     Guest
     |> where([g], g.meeting_id == ^meeting_id)
+    |> order_by([g], asc: g.inserted_at, asc: g.email)
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists the guests for a meeting whose invitation still stands, oldest first,
+  with `:participant` preloaded.
+
+  On a group meeting a guest belongs to the participant who brought them, and
+  cancelling (or moving) that seat voids the guest's invitation while the
+  meeting carries on: the guest row stays, but nobody should email it about
+  this meeting again. A guest with no participant (a solo booking's) always
+  stands.
+  """
+  @spec list_live_for_meeting(binary()) :: [Guest.t()]
+  def list_live_for_meeting(meeting_id) do
+    Guest
+    |> where([g], g.meeting_id == ^meeting_id)
+    |> live_owner()
     |> order_by([g], asc: g.inserted_at, asc: g.email)
     |> Repo.all()
   end
@@ -58,6 +78,40 @@ defmodule Tymeslot.Meetings.GuestQueries do
   def list_unsent_for_meeting(meeting_id) do
     Guest
     |> where([g], g.meeting_id == ^meeting_id and is_nil(g.confirmation_sent_at))
+    |> order_by([g], asc: g.inserted_at, asc: g.email)
+    |> Repo.all()
+  end
+
+  @doc "Lists the guests belonging to one participant, oldest first."
+  @spec list_for_participant(binary()) :: [Guest.t()]
+  def list_for_participant(participant_id) do
+    Guest
+    |> where([g], g.participant_id == ^participant_id)
+    |> order_by([g], asc: g.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists the guests belonging to one participant whose confirmation email has
+  not yet been sent.
+  """
+  @spec list_unsent_for_participant(binary()) :: [Guest.t()]
+  def list_unsent_for_participant(participant_id) do
+    Guest
+    |> where([g], g.participant_id == ^participant_id and is_nil(g.confirmation_sent_at))
+    |> order_by([g], asc: g.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists the guests among `guest_ids` on `meeting_id` whose confirmation email
+  has not yet been sent.
+  """
+  @spec list_unsent_by_ids(binary(), [binary()]) :: [Guest.t()]
+  def list_unsent_by_ids(meeting_id, guest_ids) when is_list(guest_ids) do
+    Guest
+    |> where([g], g.meeting_id == ^meeting_id and g.id in ^guest_ids)
+    |> where([g], is_nil(g.confirmation_sent_at))
     |> order_by([g], asc: g.inserted_at, asc: g.email)
     |> Repo.all()
   end
@@ -99,9 +153,44 @@ defmodule Tymeslot.Meetings.GuestQueries do
   end
 
   @doc """
+  Claims the right to send `guest` their invitation by stamping
+  `confirmation_sent_at` with `sent_at`, but only while it is still unset.
+
+  One conditional update, so of two jobs racing for the same guest (the
+  booking's confirmation and an invitation job for a guest added meanwhile)
+  exactly one gets `:claimed` and the other `:already_claimed`. The claim is
+  taken before the send; `release_confirmation_claim/2` hands it back when the
+  send fails, so a retry can try again.
+  """
+  @spec claim_confirmation(Guest.t(), DateTime.t()) :: :claimed | :already_claimed
+  def claim_confirmation(%Guest{id: id}, sent_at) do
+    {count, _rows} =
+      Guest
+      |> where([g], g.id == ^id and is_nil(g.confirmation_sent_at))
+      |> Repo.update_all(set: [confirmation_sent_at: sent_at, updated_at: sent_at])
+
+    if count == 1, do: :claimed, else: :already_claimed
+  end
+
+  @doc """
+  Releases a claim taken by `claim_confirmation/2` with the same `sent_at`,
+  leaving the guest unsent. A stamp that has since changed is left alone.
+  """
+  @spec release_confirmation_claim(Guest.t(), DateTime.t()) :: :ok
+  def release_confirmation_claim(%Guest{id: id}, sent_at) do
+    Guest
+    |> where([g], g.id == ^id and g.confirmation_sent_at == ^sent_at)
+    |> Repo.update_all(set: [confirmation_sent_at: nil, updated_at: DateTime.utc_now(:second)])
+
+    :ok
+  end
+
+  @doc """
   Guests to send the reminder for one configured offset to.
 
-  Excludes guests who were never invited (no confirmation), guests who have
+  Excludes guests whose group-booking participant has cancelled or moved
+  their seat (see `list_live_for_meeting/1`), guests who were never invited
+  (no confirmation), guests who have
   declined (the time has not changed, so their answer still stands), and
   guests already stamped for this very offset. The last is what makes an Oban
   retry safe: a meeting is reminded once per configured offset, so a partial
@@ -111,6 +200,7 @@ defmodule Tymeslot.Meetings.GuestQueries do
   def list_for_reminder(meeting_id, value, unit) do
     Guest
     |> where([g], g.meeting_id == ^meeting_id)
+    |> live_owner()
     |> where([g], not is_nil(g.confirmation_sent_at))
     |> where([g], g.status != "declined")
     |> order_by([g], asc: g.inserted_at, asc: g.email)
@@ -134,6 +224,15 @@ defmodule Tymeslot.Meetings.GuestQueries do
       |> Guest.reminders_sent_changeset(List.wrap(guest.reminders_sent) ++ [entry])
       |> Repo.update()
     end
+  end
+
+  # Keeps guests with no participant, or whose participant still holds their
+  # seat, and preloads that participant so a caller can name the booker.
+  defp live_owner(query) do
+    query
+    |> join(:left, [g], p in assoc(g, :participant), as: :owner)
+    |> where([g, owner: p], is_nil(g.participant_id) or is_nil(p.cancelled_at))
+    |> preload([owner: p], participant: p)
   end
 
   # Entries are written as string-keyed maps and read back from jsonb the same

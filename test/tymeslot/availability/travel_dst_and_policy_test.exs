@@ -58,10 +58,10 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
 
     test "reads 10:00 local on both sides of the switch" do
       for date <- [@before_switch, @after_switch] do
-        assert {:ok, hours} =
-                 BusinessHours.get_business_hours_in_timezone(date, 1, @home, @away, config())
+        assert [window] = BusinessHours.owner_windows([date], 1, @home, config())
 
-        assert DateTime.to_time(hours.start_datetime) == ~T[10:00:00],
+        assert window.start_dt |> DateTime.shift_zone!(@away) |> DateTime.to_time() ==
+                 ~T[10:00:00],
                "expected 10:00 Berlin local on #{date}"
       end
     end
@@ -69,10 +69,9 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
     test "those two 10:00s are different instants, an hour apart in UTC" do
       instants =
         for date <- [@before_switch, @after_switch] do
-          {:ok, hours} =
-            BusinessHours.get_business_hours_in_timezone(date, 1, @home, "Etc/UTC", config())
+          [window] = BusinessHours.owner_windows([date], 1, @home, config())
 
-          DateTime.to_time(hours.start_datetime)
+          window.start_dt |> DateTime.shift_zone!("Etc/UTC") |> DateTime.to_time()
         end
 
       # 10:00 CET is 09:00 UTC; 10:00 CEST is 08:00 UTC. Were the zone resolved
@@ -90,7 +89,8 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
         insert(:availability_schedule,
           profile: profile,
           is_default: true,
-          buffer_minutes: 0,
+          buffer_before_minutes: 0,
+          buffer_after_minutes: 0,
           min_advance_hours: 0,
           advance_booking_days: advance_booking_days
         )
@@ -142,7 +142,8 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
 
       # All three policy values come from the schedule, never from the trip —
       # `TravelPeriodSchema` has no fields for any of them.
-      assert config.buffer_minutes == 0
+      assert config.buffer_before_minutes == 0
+      assert config.buffer_after_minutes == 0
       assert config.min_advance_hours == 0
       assert config.max_advance_booking_days == 10
 
@@ -160,7 +161,9 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
 
       config = Policy.scheduling_config(user.id, meeting_type)
 
-      assert config.buffer_minutes == 0
+      assert config.buffer_before_minutes == 0
+
+      assert config.buffer_after_minutes == 0
       assert config.min_advance_hours == 0
       assert config.max_advance_booking_days == 365
 

@@ -102,6 +102,14 @@ config :tymeslot, Oban,
   pruner: [max_age: {1, :hour}],
   testing: :manual
 
+# ErrorTracker stays off in tests: a test that exercises it switches it on
+# for itself (and must then be async: false).
+config :error_tracker, enabled: false
+
+# The per-fingerprint throttle's counters are global, so they would carry a
+# count from one test into the next; tests that exercise it switch it on.
+config :tymeslot, :error_tracking_throttle, max_per_window: nil
+
 # In test we don't send emails
 config :tymeslot, Tymeslot.Mailer, adapter: Swoosh.Adapters.Test
 
@@ -165,10 +173,6 @@ config :tymeslot, :radicale,
 # these configs to pass them through, so they must be present.
 config :tymeslot, :google_oauth, state_secret: "test-google-state-secret"
 config :tymeslot, :outlook_oauth, state_secret: "test-outlook-state-secret"
-
-# Analytics fingerprint salt secret — fixed value so fingerprint hashes are
-# stable across test runs on the same day.
-config :tymeslot, :analytics_salt_secret, "test_analytics_salt_secret_fixed_for_repeatability"
 
 # Booking analytics is enabled by default in the test suite so the analytics
 # tests exercise the live path. Tests covering the disabled path override this
@@ -256,6 +260,9 @@ config :tymeslot, :payment_retry, base_delay_ms: 1
 # they are disposable artefacts of a failed run, and writing them under test/
 # left untracked PNGs behind after every red e2e run. Wallaby mkdir_p's the
 # directory itself, so nothing has to create it.
+# CHROME_BINARY names the browser on machines without the snap, as in SaaS.
+# Wallaby's own lookup of google-chrome on PATH does not help: a configured
+# binary replaces whatever it found, even when the path does not exist.
 config :wallaby,
   otp_app: :tymeslot,
   ecto_repos: [Tymeslot.Repo],
@@ -264,5 +271,10 @@ config :wallaby,
   screenshot_dir: Path.join(System.tmp_dir!(), "tymeslot-screenshots"),
   chromedriver: [
     headless: true,
-    binary: "/snap/chromium/current/usr/lib/chromium-browser/chrome"
+    binary:
+      System.get_env("CHROME_BINARY", "/snap/chromium/current/usr/lib/chromium-browser/chrome")
   ]
+
+# A calendar grid write guardian left driving after its test's LiveView has
+# gone gives up on writes that never answer within seconds, not minutes.
+config :tymeslot, Tymeslot.CalendarGrid.WriteGuardian, drain_timeout: 3_000

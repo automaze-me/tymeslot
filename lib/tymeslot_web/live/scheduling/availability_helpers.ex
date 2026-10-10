@@ -11,6 +11,7 @@ defmodule TymeslotWeb.Live.Scheduling.AvailabilityHelpers do
   alias Phoenix.Component
   alias Tymeslot.Availability.{Calculate, Offer, Schedules}
   alias Tymeslot.Demo
+  alias Tymeslot.Infrastructure.Tasks
 
   require Logger
 
@@ -30,6 +31,7 @@ defmodule TymeslotWeb.Live.Scheduling.AvailabilityHelpers do
       user_timezone: socket.assigns[:user_timezone],
       meeting_type: socket.assigns[:meeting_type],
       reschedule_uid: socket.assigns[:reschedule_meeting_uid],
+      reschedule_seat_token: socket.assigns[:reschedule_seat_token],
       demo_mode?: Demo.demo_mode?(socket),
       debug_calendar_module: socket.private[:debug_calendar_module]
     }
@@ -148,7 +150,7 @@ defmodule TymeslotWeb.Live.Scheduling.AvailabilityHelpers do
     fetch = fn -> Offer.days_in_range(request, start_date, end_date, duration_minutes) end
 
     if async_fetch?() do
-      task = Task.async(fetch)
+      task = Tasks.async(fetch)
 
       socket
       |> assign(:availability_task, task)

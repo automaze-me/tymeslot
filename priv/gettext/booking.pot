@@ -51,16 +51,6 @@ msgstr ""
 msgid "%{months} months in advance"
 msgstr ""
 
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "%{month} %{day}, %{year}"
-msgstr ""
-
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "%{month} %{year}"
-msgstr ""
-
 #: lib/tymeslot_web/themes/quill/scheduling/components/confirmation_component.ex
 #, elixir-autogen, elixir-format
 msgid "%{name}, your meeting %{organizer} has been rescheduled."
@@ -156,16 +146,6 @@ msgstr ""
 msgid "Appointment host"
 msgstr ""
 
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "April"
-msgstr ""
-
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "August"
-msgstr ""
-
 #: lib/tymeslot_web/themes/quill/scheduling/components/schedule/panels.ex
 #: lib/tymeslot_web/themes/rhythm/scheduling/components/schedule_component.ex
 #, elixir-autogen, elixir-format
@@ -227,11 +207,6 @@ msgstr ""
 msgid "Date"
 msgstr ""
 
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "December"
-msgstr ""
-
 #: lib/tymeslot_web/themes/shared/components/awaiting_payment.ex
 #, elixir-autogen, elixir-format
 msgid "Did the new tab not open?"
@@ -272,11 +247,6 @@ msgstr ""
 msgid "FRI"
 msgstr ""
 
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "February"
-msgstr ""
-
 #: lib/tymeslot_web/themes/quill/scheduling/components/schedule_component.ex
 #, elixir-autogen, elixir-format
 msgid "Fri"
@@ -303,24 +273,9 @@ msgstr ""
 msgid "Invalid date/time"
 msgstr ""
 
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "January"
-msgstr ""
-
 #: lib/tymeslot_web/themes/quill/scheduling/components/booking_component.ex
 #, elixir-autogen, elixir-format
 msgid "John Doe"
-msgstr ""
-
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "July"
-msgstr ""
-
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "June"
 msgstr ""
 
 #: lib/tymeslot_web/themes/shared/localization_helpers.ex
@@ -347,16 +302,6 @@ msgstr ""
 #: lib/tymeslot_web/themes/shared/localization_helpers.ex
 #, elixir-autogen, elixir-format
 msgid "MON"
-msgstr ""
-
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "March"
-msgstr ""
-
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "May"
 msgstr ""
 
 #: lib/tymeslot_web/themes/rhythm/scheduling/components/confirmation_component.ex
@@ -413,16 +358,6 @@ msgstr ""
 #: lib/tymeslot_web/themes/rhythm/scheduling/components/booking_component.ex
 #, elixir-autogen, elixir-format
 msgid "No time selected"
-msgstr ""
-
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "November"
-msgstr ""
-
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "October"
 msgstr ""
 
 #: lib/tymeslot_web/themes/shared/components/awaiting_payment.ex
@@ -572,11 +507,6 @@ msgstr ""
 #: lib/tymeslot_web/themes/rhythm/scheduling/components/confirmation_component.ex
 #, elixir-autogen, elixir-format
 msgid "Sent to"
-msgstr ""
-
-#: lib/tymeslot_web/themes/shared/localization_helpers.ex
-#, elixir-autogen, elixir-format
-msgid "September"
 msgstr ""
 
 #: lib/tymeslot_web/themes/rhythm/scheduling/components/schedule_component.ex
@@ -862,11 +792,6 @@ msgstr ""
 #: lib/tymeslot_web/themes/shared/components/guest_field.ex
 #, elixir-autogen, elixir-format
 msgid "Remove guest %{email}"
-msgstr ""
-
-#: lib/tymeslot_web/themes/shared/guest_booking.ex
-#, elixir-autogen, elixir-format
-msgid "You can add up to %{count} guests."
 msgstr ""
 
 #: lib/tymeslot_web/themes/shared/guest_booking.ex
@@ -1416,4 +1341,114 @@ msgstr ""
 #: lib/tymeslot_web/themes/shared/components/location_field.ex
 #, elixir-autogen, elixir-format
 msgid "Your phone number"
+msgstr ""
+
+#: lib/tymeslot_web/themes/core/dispatcher.ex
+#, elixir-autogen, elixir-format
+msgid "Reload page"
+msgstr ""
+
+#: lib/tymeslot_web/themes/core/dispatcher.ex
+#, elixir-autogen, elixir-format
+msgid "Something went wrong"
+msgstr ""
+
+#: lib/tymeslot_web/themes/core/dispatcher.ex
+#, elixir-autogen, elixir-format
+msgid "This page could not be loaded. Please try again."
+msgstr ""
+
+#: lib/tymeslot_web/themes/shared/components/location_field.ex
+#, elixir-autogen, elixir-format
+msgid "The address will be arranged with you after booking."
+msgstr ""
+
+#: lib/tymeslot_web/themes/shared/components/location_field.ex
+#, elixir-autogen, elixir-format
+msgid "Which location?"
+msgstr ""
+
+#: lib/tymeslot_web/themes/shared/components/seat_badge.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} seat left"
+msgid_plural "%{count} seats left"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/tymeslot_web/live/scheduling/handlers/booking_error_message.ex
+#, elixir-autogen, elixir-format
+msgid "This booking has already been cancelled or moved."
+msgstr ""
+
+#: lib/tymeslot_web/live/scheduling/handlers/booking_error_message.ex
+#, elixir-autogen, elixir-format
+msgid "This is a group booking, so each participant moves their own spot from their confirmation email."
+msgstr ""
+
+#: lib/tymeslot_web/themes/shared/guest_booking.ex
+#, elixir-autogen, elixir-format
+msgid "This time only has room for %{count} of your guests, so the rest were removed."
+msgid_plural "This time only has room for %{count} of your guests, so the rest were removed."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/tymeslot_web/live/scheduling/handlers/booking_error_message.ex
+#, elixir-autogen, elixir-format
+msgid "You already have a spot at this time. Check your email for your booking confirmation."
+msgstr ""
+
+#: lib/tymeslot_web/themes/shared/guest_booking.ex
+#, elixir-autogen, elixir-format
+msgid "You can add up to %{count} guest."
+msgid_plural "You can add up to %{count} guests."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/tymeslot_web/live/scheduling/handlers/booking_error_message.ex
+#, elixir-autogen, elixir-format
+msgid "This spot can no longer be moved. Cancel it and book a new time instead, or contact the host."
+msgstr ""
+
+#: lib/tymeslot_web/themes/shared/components/group_session.ex
+#, elixir-autogen, elixir-format
+msgid "Group session · up to %{count} person"
+msgid_plural "Group session · up to %{count} people"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/tymeslot_web/themes/shared/components/group_session.ex
+#, elixir-autogen, elixir-format
+msgid "Group session: you have one of %{count} spot."
+msgid_plural "Group session: you have one of %{count} spots."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/tymeslot_web/themes/shared/components/group_session.ex
+#, elixir-autogen, elixir-format
+msgid "Moving your spot on %{datetime}. Pick a new time below."
+msgstr ""
+
+#: lib/tymeslot_web/live/scheduling/handlers/booking_error_message.ex
+#, elixir-autogen, elixir-format
+msgid "This is your current time. Pick a different time to move your spot."
+msgstr ""
+
+#: lib/tymeslot_web/themes/shared/seat_move_link.ex
+#, elixir-autogen, elixir-format
+msgid "This link to move your spot has already been used. You can book a new time below."
+msgstr ""
+
+#: lib/tymeslot_web/themes/shared/localization_helpers.ex
+#, elixir-autogen, elixir-format
+msgid "Ends %{time} on %{weekday} %{day} %{month}"
+msgstr ""
+
+#: lib/tymeslot/meeting_types/location_selection.ex
+#, elixir-autogen, elixir-format
+msgid "Phone call"
+msgstr ""
+
+#: lib/tymeslot/meeting_types/location_selection.ex
+#, elixir-autogen, elixir-format
+msgid "Somewhere else"
 msgstr ""

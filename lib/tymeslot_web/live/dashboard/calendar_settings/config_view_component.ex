@@ -11,6 +11,8 @@ defmodule TymeslotWeb.Dashboard.CalendarSettings.ConfigViewComponent do
   use TymeslotWeb, :live_component
   use Gettext, backend: TymeslotWeb.Gettext
 
+  alias Tymeslot.Infrastructure.Logging.LogFormat
+  alias Tymeslot.Infrastructure.Tasks
   alias Tymeslot.Integrations.Calendar
   alias Tymeslot.Integrations.Calendar.DisplayHelpers
   alias Tymeslot.Integrations.Calendar.Exchange.Creation, as: ExchangeCreation
@@ -150,9 +152,12 @@ defmodule TymeslotWeb.Dashboard.CalendarSettings.ConfigViewComponent do
     socket =
       socket
       |> assign(is_saving: true, form_values: params)
-      |> start_async(:create_subscription, fn ->
-        Calendar.create_subscription_with_validation(user_id, params, metadata: metadata)
-      end)
+      |> start_async(
+        :create_subscription,
+        Tasks.with_context(fn ->
+          Calendar.create_subscription_with_validation(user_id, params, metadata: metadata)
+        end)
+      )
 
     {:noreply, socket}
   end
@@ -225,7 +230,7 @@ defmodule TymeslotWeb.Dashboard.CalendarSettings.ConfigViewComponent do
   end
 
   def handle_async(:create_subscription, {:exit, reason}, socket) do
-    Logger.error("Calendar subscription creation task crashed", reason: inspect(reason))
+    Logger.error("Calendar subscription creation task crashed", reason: LogFormat.reason(reason))
 
     {:noreply,
      assign(socket,
@@ -302,7 +307,6 @@ defmodule TymeslotWeb.Dashboard.CalendarSettings.ConfigViewComponent do
       <Components.config_view
         selected_provider={@selected_provider}
         myself={@myself}
-        security_metadata={@security_metadata}
         form_errors={@form_errors}
         form_values={@form_values}
         discovered_calendars={@discovered_calendars}

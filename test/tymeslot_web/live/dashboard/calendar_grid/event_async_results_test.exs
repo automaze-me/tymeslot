@@ -193,7 +193,7 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.EventAsyncResultsTest do
       )
 
       html = render(lv)
-      assert html =~ "Recurring events cannot be moved to another calendar yet."
+      assert html =~ "Recurring events on this calendar cannot be moved to another calendar."
       refute html =~ "Could not move the event"
     end
 
@@ -237,6 +237,30 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.EventAsyncResultsTest do
 
       render(lv)
       assert render(lv) =~ "Event deleted."
+    end
+
+    # The event is gone, so the delete is not reported as failed, but the
+    # organiser who asked to notify is not told attendees were.
+    test "a cancellation that could not be enqueued is reported", %{conn: conn, user: user} do
+      integration = insert(:calendar_integration, user: user, is_active: true)
+
+      {:ok, lv, _html} = live(conn, ~p"/dashboard/calendar")
+
+      send(
+        lv.pid,
+        {:delete_event_result,
+         {:ok,
+          %{
+            uid: "gone",
+            integration_id: integration.id,
+            linked_meeting: :none,
+            attendees_notified: :failed
+          }}}
+      )
+
+      html = render(lv)
+      assert html =~ "Event deleted, but the attendees could not be notified."
+      refute html =~ "Attendees have been notified"
     end
 
     test "a cancelled linked meeting is reported", %{conn: conn, user: user} do
@@ -309,7 +333,10 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.EventAsyncResultsTest do
       assert html =~ "Meeting created and invitation sent"
     end
 
-    test "error path flashes the reason", %{conn: conn, user: user} do
+    test "error path flashes a translated sentence, never an unrecognised reason", %{
+      conn: conn,
+      user: user
+    } do
       _integration = insert(:calendar_integration, user: user, is_active: true)
 
       {:ok, lv, _html} = live(conn, ~p"/dashboard/calendar")
@@ -317,7 +344,8 @@ defmodule TymeslotWeb.Dashboard.CalendarGrid.EventAsyncResultsTest do
       send(lv.pid, {:create_ad_hoc_meeting_result, {:error, "Calendar unavailable"}})
 
       html = render(lv)
-      assert html =~ "Calendar unavailable"
+      assert html =~ "Failed to create appointment. Please try again."
+      refute html =~ "Calendar unavailable"
     end
   end
 

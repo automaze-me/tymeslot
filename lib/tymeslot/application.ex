@@ -10,27 +10,39 @@ defmodule Tymeslot.Application do
   alias Tymeslot.Analytics.Telemetry, as: AnalyticsTelemetry
   alias Tymeslot.AppSettings
   alias Tymeslot.Auth.AdminBootstrap
+  alias Tymeslot.CalendarGrid.WriteGuardianSupervisor
 
   alias Tymeslot.Infrastructure.{
+    AdminAlerts,
     CrashReporter,
     FinchPool,
     IndexHealth,
     Metrics,
     ObanCron,
-    ObanFailureAlerter,
+    ObanEngine,
     ObanLogger,
     ObanQueues,
     ObanRescue,
+    PoolPressureMonitor,
     ProxyConfig,
-    ProxyCredentials
+    ProxyCredentials,
+    Tasks
   }
 
-  alias Tymeslot.Infrastructure.Logging.{FileSink, MetadataRedactor}
+  alias Tymeslot.Infrastructure.ErrorTracking
+  alias Tymeslot.Infrastructure.ErrorTracking.Alerter, as: ErrorAlerter
+  alias Tymeslot.Infrastructure.ErrorTracking.ObanOutcomes
+  alias Tymeslot.Infrastructure.ErrorTracking.ReasonScrubber
+  alias Tymeslot.Infrastructure.ErrorTracking.SafeIntegrations
+  alias Tymeslot.Infrastructure.ErrorTracking.Throttle
+  alias Tymeslot.Infrastructure.Logging.{FileSink, LogFormat, MetadataRedactor}
   alias Tymeslot.Integrations.Calendar.TokenRefreshJob
   alias Tymeslot.Integrations.{HealthCheck, Telemetry}
   alias Tymeslot.Integrations.Shared.Lock
   alias Tymeslot.Mailer.HealthCheck, as: MailerHealthCheck
+  alias Tymeslot.Payments.Webhooks.SecretCheck
   alias Tymeslot.Telegram.BotSetup
+  alias Tymeslot.Workers.ErrorTrackerMaintenanceWorker
   alias TymeslotWeb.Endpoint
   alias TymeslotWeb.Plugs.AdditionalDashboardPlugs
   alias TymeslotWeb.Router
@@ -63,8 +75,7 @@ defmodule Tymeslot.Application do
     # levels for every Oban job process.
     ObanLogger.attach()
 
-    # Raise an admin alert when a job fails permanently (exhausts its retries).
-    ObanFailureAlerter.attach()
+    attach_error_tracking()
 
     # Set up telemetry handlers for metrics
     Metrics.setup_handlers()
@@ -78,6 +89,9 @@ defmodule Tymeslot.Application do
     # Base children that are always started
     base_children = [
       TymeslotWeb.Telemetry,
+      # Per-fingerprint cap on stored error occurrences; before the Repo so
+      # that no report can reach the database unthrottled once it is up.
+      Throttle,
       Tymeslot.Repo,
       {DNSCluster, query: Application.get_env(:tymeslot, :dns_cluster_query) || :ignore},
       {PubSub, name: Tymeslot.PubSub},
@@ -86,7 +100,11 @@ defmodule Tymeslot.Application do
       # Start token refresh lock manager
       {Lock, []},
       # Task Supervisor for async operations
-      {Task.Supervisor, name: Tymeslot.TaskSupervisor}
+      {Task.Supervisor, name: Tymeslot.TaskSupervisor},
+      # Bounded, so a crash storm cannot spawn one database writer per crash
+      {Task.Supervisor,
+       name: ErrorTracking.task_supervisor(),
+       max_children: Application.get_env(:tymeslot, :error_tracking_max_concurrent_reports, 10)}
     ]
 
     # Additional children for non-test environments
@@ -114,7 +132,9 @@ defmodule Tymeslot.Application do
           # Own the account lockout ETS table (AccountLockout is a plain module)
           Tymeslot.Security.AccountLockout.TableOwner,
           # Start circuit breaker supervisor
-          Tymeslot.Infrastructure.CircuitBreakerSupervisor
+          Tymeslot.Infrastructure.CircuitBreakerSupervisor,
+          # Alert when queries keep waiting for a database connection
+          PoolPressureMonitor
         ]
       else
         # Only start essential services for tests
@@ -154,7 +174,17 @@ defmodule Tymeslot.Application do
       base_children ++
         production_children ++
         dev_children ++
-        tz_watcher_children() ++ [TymeslotWeb.Endpoint] ++ startup_check_children()
+        [
+          # Guardians that finish the calendar grid's queued writes when the
+          # grid's LiveView is gone. Children stop in reverse order, so placed
+          # here they stop right after the Endpoint: the LiveViews it takes
+          # down hand their queues to guardians that can still reach the
+          # circuit breakers, Oban and the caches, and on stopping save what
+          # is left for a later sync. Started any earlier, they would drive
+          # the queue against stopped breakers and lose it.
+          WriteGuardianSupervisor,
+          TymeslotWeb.Endpoint
+        ] ++ startup_check_children()
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
@@ -162,27 +192,15 @@ defmodule Tymeslot.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
-        Logger.info("Tymeslot application started successfully", pid: inspect(pid))
+        Logger.info("Tymeslot application started successfully", pid: LogFormat.reason(pid))
 
         # Apply DB-backed admin overrides on top of config-layer values.
         # Must run after Repo is started; safe in test mode (the singleton row
         # has all nils on a fresh test DB, so load!/0 is effectively a no-op).
         AppSettings.load!()
 
-        # Forward every unhandled process crash (web, LiveView, GenServer, Task)
-        # to AdminAlerts. Attached only after the supervision tree is up, since
-        # the handler depends on Tymeslot.Security.RateLimit (ETS) and
-        # Tymeslot.TaskSupervisor. Skipped in test, where intentionally-crashed
-        # processes would otherwise generate alert noise; tests attach it
-        # explicitly. Also skipped when admin alerts are disabled — the handler's
-        # only purpose is forwarding to AdminAlerts, so attaching it when alerts
-        # are off wastes per-crash work (rate-limit ETS writes, task spawns,
-        # formatting) and emits spurious "ADMIN ALERT" log lines.
         if Application.get_env(:tymeslot, :environment) != :test do
-          if Application.get_env(:tymeslot, :admin_alerts_enabled, false) do
-            CrashReporter.attach()
-          end
-
+          check_deployment_config()
           schedule_periodic_jobs()
           AdminBootstrap.warn_if_orphaned_install()
         end
@@ -190,9 +208,57 @@ defmodule Tymeslot.Application do
         {:ok, pid}
 
       {:error, reason} = error ->
-        Logger.error("Failed to start Tymeslot application", reason: inspect(reason))
+        Logger.error("Failed to start Tymeslot application", reason: LogFormat.reason(reason))
         error
     end
+  end
+
+  defp attach_error_tracking do
+    # Raise an admin alert when ErrorTracker records a new error, or a
+    # resolved one happens again, wherever it was raised (request, LiveView,
+    # job or crashed process).
+    ErrorAlerter.attach()
+
+    # ErrorTracker's own integrations write to the database from telemetry
+    # handlers, and telemetry detaches a handler that raises: one failed
+    # write would stop exception recording until the next restart. Replace
+    # them with handlers that log such a failure and stay attached.
+    SafeIntegrations.install()
+
+    # Mask email addresses and credentials in the exception messages
+    # ErrorTracker stores, which its context Filter does not reach.
+    ReasonScrubber.attach()
+
+    # Both skipped in test, where deliberately crashed processes and jobs
+    # that discard on purpose would otherwise be recorded; tests attach them
+    # explicitly.
+    if Application.get_env(:tymeslot, :environment) != :test do
+      # Record every process crash ErrorTracker's integrations do not see
+      # (GenServers, Tasks, bare processes). Attached before the supervision
+      # tree starts, so a child crashing on boot is recorded. The handler
+      # offloads to the bounded ErrorTracking.TaskSupervisor, started among
+      # the first children after the Repo; a crash before that, or while all
+      # its tasks are busy, is dropped, never raised. It reads ErrorTracker's
+      # `enabled` switch on every crash, so switching error tracking off
+      # stops it without a restart.
+      CrashReporter.attach()
+
+      # Record jobs a worker discards or cancels, and alert on jobs the
+      # Lifeline discards. Oban starts inside the tree, so attaching first
+      # misses nothing.
+      ObanOutcomes.attach()
+    end
+  end
+
+  # Checks that read DB-backed settings, so they run after AppSettings.load!/0.
+  defp check_deployment_config do
+    # A recipient set only in the admin settings counts.
+    AdminAlerts.check_config()
+
+    # Meeting payments can be switched on in the admin settings, which is what
+    # makes the Connect webhook secret required.
+    _missing = SecretCheck.check()
+    :ok
   end
 
   defp validate_config! do
@@ -293,21 +359,6 @@ defmodule Tymeslot.Application do
     end
   end
 
-  # The IANA time zone database is pinned to a vendored release (see
-  # `config :tz, :iana_version`), so nothing tells us a newer one exists unless
-  # we ask. This watcher only logs a warning when data.iana.org publishes a
-  # release newer than the one compiled in; it never downloads or recompiles,
-  # which would fail on a read-only release filesystem anyway. Off by default so
-  # dev and test make no outbound calls; `config/prod.exs` turns it on.
-  @spec tz_watcher_children() :: [{module(), keyword()}]
-  defp tz_watcher_children do
-    if Application.get_env(:tymeslot, :tz_watch_enabled, false) do
-      [{Tz.WatchPeriodically, interval_in_days: 7}]
-    else
-      []
-    end
-  end
-
   @spec validate_mailer_config!() :: :ok
   defp validate_mailer_config! do
     mailer_config = Application.get_env(:tymeslot, Tymeslot.Mailer)
@@ -390,8 +441,8 @@ defmodule Tymeslot.Application do
   @impl Application
   def config_change(changed, _new, removed) do
     Logger.info("Application configuration changed",
-      changed: inspect(changed),
-      removed: inspect(removed)
+      changed: LogFormat.reason(changed),
+      removed: LogFormat.reason(removed)
     )
 
     Endpoint.config_change(changed, removed)
@@ -404,7 +455,11 @@ defmodule Tymeslot.Application do
   defp oban_config do
     base_config = Application.get_env(:tymeslot, Oban) || [repo: Tymeslot.Repo]
 
-    ObanQueues.build(base_config)
+    # Every environment runs the engine that carries the enqueuer's
+    # correlation id into each job.
+    base_config
+    |> Keyword.put_new(:engine, ObanEngine)
+    |> ObanQueues.build()
   end
 
   # Schedule periodic jobs using TaskSupervisor for proper error handling
@@ -412,6 +467,12 @@ defmodule Tymeslot.Application do
   defp schedule_periodic_jobs do
     schedule_supervised("Google Calendar token refresh", fn ->
       TokenRefreshJob.schedule_periodic_refresh()
+    end)
+
+    # Mask the stored error reasons again when the masking rules have
+    # changed since the last boot.
+    schedule_supervised("ErrorTracker reason re-masking", fn ->
+      {:ok, _job} = ErrorTrackerMaintenanceWorker.enqueue_full_remask()
     end)
 
     # Register Telegram webhook if shared bot mode is enabled (production only —
@@ -427,14 +488,14 @@ defmodule Tymeslot.Application do
   end
 
   defp schedule_supervised(name, fun) do
-    case Task.Supervisor.start_child(Tymeslot.TaskSupervisor, fun) do
+    case Tasks.start_child(Tymeslot.TaskSupervisor, fun) do
       {:ok, _pid} ->
         Logger.info("Scheduled post-startup task", task: name)
 
       {:error, reason} ->
         Logger.error("Failed to schedule post-startup task",
           task: name,
-          reason: inspect(reason)
+          reason: LogFormat.reason(reason)
         )
     end
   end

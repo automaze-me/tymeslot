@@ -13,7 +13,7 @@ defmodule TymeslotWeb.Session.LoginComponent do
   import TymeslotWeb.Shared.Auth.LayoutComponents
   import TymeslotWeb.Shared.Auth.FormComponents
   import TymeslotWeb.Shared.Auth.ButtonComponents
-  import TymeslotWeb.Components.CoreComponents
+  use TymeslotWeb.Components.CoreComponents
   alias Tymeslot.Infrastructure.Config
   alias TymeslotWeb.Live.Shared.FormValidationHelpers
 
@@ -46,6 +46,7 @@ defmodule TymeslotWeb.Session.LoginComponent do
         <:form>
           <.auth_form
             id="login-form"
+            novalidate
             action="/auth/session"
             method="POST"
             loading={@loading}

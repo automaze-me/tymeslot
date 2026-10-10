@@ -13,6 +13,7 @@ defmodule Tymeslot.Integrations.Video.Providers.ZoomProvider do
   alias Tymeslot.Infrastructure.BreakerOutcome
   alias Tymeslot.Infrastructure.Config
   alias Tymeslot.Infrastructure.HTTPClient
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Infrastructure.Logging.Redactor
   alias Tymeslot.Integrations.Shared.ProviderConfigHelper
   alias Tymeslot.Integrations.Video.OAuthTokenManager
@@ -127,7 +128,7 @@ defmodule Tymeslot.Integrations.Video.Providers.ZoomProvider do
   end
 
   defp log_create_meeting_room_error(reason) do
-    Logger.error("Failed to create Zoom meeting", error: inspect(reason))
+    Logger.error("Failed to create Zoom meeting", error: LogFormat.reason(reason))
   end
 
   # A rejected/expired grant (`invalid_grant`, `invalid_client`,
@@ -159,6 +160,10 @@ defmodule Tymeslot.Integrations.Video.Providers.ZoomProvider do
     case room_data.meeting_url do
       nil ->
         {:error, "Missing meeting URL in room data"}
+
+      # Nobody to name: the room's own link is the participant's link.
+      base_url when participant_name in [nil, ""] ->
+        {:ok, base_url}
 
       base_url ->
         encoded_name = URI.encode_www_form(participant_name)
@@ -277,7 +282,7 @@ defmodule Tymeslot.Integrations.Video.Providers.ZoomProvider do
       {:error, reason} = error ->
         Logger.error("Failed to update Zoom meeting",
           room_ref: Redactor.fingerprint(room_id),
-          error: inspect(reason)
+          error: LogFormat.reason(reason)
         )
 
         error
@@ -297,7 +302,7 @@ defmodule Tymeslot.Integrations.Video.Providers.ZoomProvider do
       {:error, reason} = error ->
         Logger.error("Failed to delete Zoom meeting",
           room_ref: Redactor.fingerprint(room_id),
-          error: inspect(reason)
+          error: LogFormat.reason(reason)
         )
 
         error
@@ -347,7 +352,7 @@ defmodule Tymeslot.Integrations.Video.Providers.ZoomProvider do
         persist_refreshed_tokens(config, refreshed)
 
       {:error, reason} ->
-        Logger.error("Failed to refresh Zoom OAuth token", reason: inspect(reason))
+        Logger.error("Failed to refresh Zoom OAuth token", reason: LogFormat.reason(reason))
         {:error, "Token refresh failed: #{reason}"}
     end
   end
@@ -456,7 +461,7 @@ defmodule Tymeslot.Integrations.Video.Providers.ZoomProvider do
       {:error, reason} ->
         Logger.warning("Network error verifying Zoom meeting after creation",
           room_ref: Redactor.fingerprint(to_string(meeting_id)),
-          error: inspect(reason)
+          error: LogFormat.reason(reason)
         )
     end
   end

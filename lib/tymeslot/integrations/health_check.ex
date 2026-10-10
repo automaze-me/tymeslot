@@ -41,6 +41,8 @@ defmodule Tymeslot.Integrations.HealthCheck do
 
   require Logger
 
+  alias Tymeslot.Infrastructure.ErrorTracking
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Integrations.Calendar.CalendarIntegrationQueries
   alias Tymeslot.Integrations.CalendarManagement
   alias Tymeslot.Integrations.HealthCheck.IntegrationHealthStateQueries
@@ -179,7 +181,7 @@ defmodule Tymeslot.Integrations.HealthCheck do
         Logger.warning("Failed to enqueue immediate verification probe after user recovery",
           integration_type: type,
           integration_id: integration_id,
-          reason: inspect(reason)
+          reason: LogFormat.reason(reason)
         )
 
         :ok
@@ -273,11 +275,25 @@ defmodule Tymeslot.Integrations.HealthCheck do
   def handle_info(:scheduled_check, state) do
     Logger.debug("Scheduling health check jobs for all integrations")
 
-    Scheduler.schedule_all()
+    run_scheduled_sweep()
 
     timer = schedule_next_check(@check_interval)
 
     {:noreply, %{state | check_timer: timer}}
+  end
+
+  # A failed sweep must never take this process down: it is permanent under
+  # the application supervisor, so repeated crashes would exceed the restart
+  # intensity and stop the whole application. Report it and wait for the next
+  # tick instead.
+  @spec run_scheduled_sweep() :: :ok
+  defp run_scheduled_sweep do
+    Scheduler.schedule_all()
+    :ok
+  rescue
+    e ->
+      ErrorTracking.report_error(e, __STACKTRACE__, %{context: :scheduled_health_check})
+      :ok
   end
 
   # Private Functions — Orchestration Logic

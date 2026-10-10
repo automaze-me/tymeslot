@@ -16,7 +16,7 @@ defmodule TymeslotWeb.Session.PasswordResetComponent do
   import TymeslotWeb.Shared.Auth.FormComponents
   import TymeslotWeb.Shared.Auth.ButtonComponents
   import TymeslotWeb.Shared.PasswordToggleButtonComponent
-  import TymeslotWeb.Components.CoreComponents
+  use TymeslotWeb.Components.CoreComponents
   alias TymeslotWeb.Live.Shared.FormValidationHelpers
 
   @doc """
@@ -40,6 +40,7 @@ defmodule TymeslotWeb.Session.PasswordResetComponent do
       <:form>
         <.auth_form
           id="reset-password-form"
+          novalidate
           class="space-y-6"
           phx-submit="submit_reset_request"
           loading={@loading}
@@ -152,6 +153,7 @@ defmodule TymeslotWeb.Session.PasswordResetComponent do
 
         <.auth_form
           id="new-password-form"
+          novalidate
           class="space-y-4 sm:space-y-5"
           action={~p"/auth/reset-password/#{@reset_token}"}
           phx-submit="submit_password_reset"

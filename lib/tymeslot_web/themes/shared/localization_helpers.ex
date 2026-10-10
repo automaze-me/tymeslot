@@ -5,24 +5,37 @@ defmodule TymeslotWeb.Themes.Shared.LocalizationHelpers do
   """
   use Gettext, backend: TymeslotWeb.Gettext
   alias Calendar
+  alias Tymeslot.Availability.TimeSlots
   alias Tymeslot.Utils.DateTimeUtils
   alias Tymeslot.Utils.DateTimeUtils.Display
   alias TymeslotWeb.Helpers.LocaleFormat
 
   @doc """
-  Groups time slots by period of day with translated period names.
+  Groups normalised slot maps (`TymeslotWeb.Components.MeetingUtils.slot/0`)
+  by period of day with translated period names.
   """
-  @spec group_slots_by_period([String.t()]) :: [{String.t(), [String.t()]}]
+  @spec group_slots_by_period([map()]) :: [{String.t(), [map()]}]
   def group_slots_by_period(slots) do
-    grouped = Display.group_slots_by_period(slots)
+    grouped = Enum.group_by(slots, &Display.get_time_period(&1.time))
 
     [
-      {dgettext("booking", "Early Morning"), Map.get(grouped, "Early Morning", [])},
-      {dgettext("booking", "Morning"), Map.get(grouped, "Morning", [])},
-      {dgettext("booking", "Afternoon"), Map.get(grouped, "Afternoon", [])},
-      {dgettext("booking", "Evening"), Map.get(grouped, "Evening", [])},
-      {dgettext("booking", "Late Night"), Map.get(grouped, "Late Night", [])}
+      {dgettext("booking", "Early Morning"), sorted_period(grouped, "Early Morning")},
+      {dgettext("booking", "Morning"), sorted_period(grouped, "Morning")},
+      {dgettext("booking", "Afternoon"), sorted_period(grouped, "Afternoon")},
+      {dgettext("booking", "Evening"), sorted_period(grouped, "Evening")},
+      {dgettext("booking", "Late Night"), sorted_period(grouped, "Late Night")}
     ]
+  end
+
+  defp sorted_period(grouped, period) do
+    grouped
+    |> Map.get(period, [])
+    |> Enum.sort_by(fn slot ->
+      case DateTimeUtils.parse_time_string(slot.time) do
+        {:ok, time} -> {time.hour, time.minute, time.second}
+        {:error, _reason} -> {99, 99, 99}
+      end
+    end)
   end
 
   @doc """
@@ -55,6 +68,60 @@ defmodule TymeslotWeb.Themes.Shared.LocalizationHelpers do
 
   def format_booking_datetime(_date, _time, _timezone),
     do: dgettext("booking", "Invalid date/time")
+
+  @doc """
+  When a meeting starting at `time` on `date` (the booker's clock) ends on a
+  later date, a short line saying when; nil when it ends the day it starts or
+  the inputs cannot be read. `duration` is minutes or a slug such as "60min".
+  """
+  @spec format_next_day_end(
+          String.t() | nil,
+          String.t() | nil,
+          integer() | String.t() | nil,
+          String.t() | nil
+        ) :: String.t() | nil
+  def format_next_day_end(_date, _time, nil, _timezone), do: nil
+
+  def format_next_day_end(date, time, duration, timezone)
+      when is_binary(date) and is_binary(time) and is_binary(timezone) do
+    with {:ok, start_date} <- parse_date(date),
+         {:ok, start_time} <- DateTimeUtils.parse_time_string(time),
+         {:ok, start} <- DateTimeUtils.resolve_local(start_date, start_time, timezone),
+         finish = DateTime.add(start, TimeSlots.parse_duration(duration), :minute),
+         :gt <- Date.compare(DateTime.to_date(finish), start_date) do
+      dgettext("booking", "Ends %{time} on %{weekday} %{day} %{month}",
+        time: format_time_by_locale(finish),
+        weekday: mid_sentence_weekday(Date.day_of_week(DateTime.to_date(finish))),
+        day: finish.day,
+        month: month_in_date(finish.month)
+      )
+    else
+      _same_day_or_unreadable -> nil
+    end
+  end
+
+  def format_next_day_end(_date, _time, _duration, _timezone), do: nil
+
+  @doc """
+  `format_next_day_end/4` for a booking or confirmation step's assigns: the
+  chosen date and time, the meeting type's duration (or the bare `duration`)
+  and the booker's timezone.
+  """
+  @spec booking_next_day_end(map()) :: String.t() | nil
+  def booking_next_day_end(assigns) do
+    duration =
+      case assigns[:meeting_type] do
+        %{duration_minutes: minutes} -> minutes
+        _no_meeting_type -> assigns[:duration]
+      end
+
+    format_next_day_end(
+      assigns[:selected_date],
+      assigns[:selected_time],
+      duration,
+      assigns[:user_timezone]
+    )
+  end
 
   @doc """
   Formats a meeting start time for the payment return pages — localized and
@@ -132,7 +199,8 @@ defmodule TymeslotWeb.Themes.Shared.LocalizationHelpers do
   def to_attendee_datetime(_other, _timezone), do: :error
 
   @doc """
-  Formats date string or struct for display.
+  Formats a date string or struct for display in the current locale's word
+  order, via `LocaleFormat.format_date/2`: "15 July 2026", "15. Juli 2026".
   """
   @spec format_date(String.t() | Date.t() | DateTime.t() | nil) :: String.t()
   def format_date(nil), do: ""
@@ -146,8 +214,7 @@ defmodule TymeslotWeb.Themes.Shared.LocalizationHelpers do
 
   @spec format_date(Date.t()) :: String.t()
   def format_date(%Date{} = date) do
-    month = month_in_date(date.month)
-    dgettext("booking", "%{month} %{day}, %{year}", month: month, day: date.day, year: date.year)
+    LocaleFormat.format_date(date, current_locale())
   end
 
   @spec format_date(DateTime.t()) :: String.t()
@@ -157,7 +224,7 @@ defmodule TymeslotWeb.Themes.Shared.LocalizationHelpers do
 
   @doc """
   Builds a full, screen-reader-friendly date label — the localized weekday
-  followed by the localized date, e.g. "Monday, July 15, 2026". Accepts an ISO
+  followed by the localized date, e.g. "Monday, 15 July 2026". Accepts an ISO
   date string (as carried in the calendar day maps) or a `Date`, and falls back
   to the raw input on a parse failure so a day button is never left unlabelled.
   """
@@ -211,29 +278,25 @@ defmodule TymeslotWeb.Themes.Shared.LocalizationHelpers do
 
   # A month named inside a date takes a different form from a standalone one in
   # several locales: Ukrainian and Czech use the genitive ("15 червня 2026"),
-  # French and Italian lowercase it. `get_month_name/1` is the standalone form
-  # for "%{month} %{year}" headings; this is the in-date form.
+  # French and Italian lowercase it. The headings below use the standalone form
+  # (`LocaleFormat.format_standalone_month_name/2`); this is the in-date form.
   @spec month_in_date(integer()) :: String.t()
   defp month_in_date(month) do
-    LocaleFormat.format_month_name(month, Gettext.get_locale(TymeslotWeb.Gettext))
+    LocaleFormat.format_month_name(month, current_locale())
   end
 
-  @spec get_month_name(integer()) :: String.t()
-  defp get_month_name(month) do
-    case month do
-      1 -> dgettext("booking", "January")
-      2 -> dgettext("booking", "February")
-      3 -> dgettext("booking", "March")
-      4 -> dgettext("booking", "April")
-      5 -> dgettext("booking", "May")
-      6 -> dgettext("booking", "June")
-      7 -> dgettext("booking", "July")
-      8 -> dgettext("booking", "August")
-      9 -> dgettext("booking", "September")
-      10 -> dgettext("booking", "October")
-      11 -> dgettext("booking", "November")
-      12 -> dgettext("booking", "December")
-    end
+  @spec standalone_month(integer()) :: String.t()
+  defp standalone_month(month) do
+    LocaleFormat.format_standalone_month_name(month, current_locale())
+  end
+
+  defp current_locale, do: Gettext.get_locale(TymeslotWeb.Gettext)
+
+  # German nouns and English weekdays keep their capital inside a sentence; the
+  # other catalogues capitalise them only for use as a heading.
+  defp mid_sentence_weekday(day) do
+    name = get_weekday_name(day)
+    if current_locale() in ["en", "de"], do: name, else: String.downcase(name)
   end
 
   @spec get_weekday_name(integer()) :: String.t()
@@ -283,16 +346,34 @@ defmodule TymeslotWeb.Themes.Shared.LocalizationHelpers do
   """
   @spec format_time_by_locale(Calendar.time()) :: String.t()
   def format_time_by_locale(time) do
-    LocaleFormat.format_time(time, Gettext.get_locale(TymeslotWeb.Gettext))
+    LocaleFormat.format_time(time, current_locale())
   end
 
   @doc """
-  Gets month and year display string.
+  Labels a slot key ("5:30 PM") on the visitor's clock.
+
+  The key is the slot's identity: the URL `time` param, slot matching and the
+  booking submission all read it verbatim, so it is formatted here, at render
+  time, and never stored formatted. A key that does not parse is shown as it
+  stands rather than replaced by some other time; `nil` passes through so a
+  template can fall back to its own placeholder.
+  """
+  @spec format_slot_label(String.t() | nil) :: String.t() | nil
+  def format_slot_label(nil), do: nil
+
+  def format_slot_label(slot_key) when is_binary(slot_key) do
+    case DateTimeUtils.parse_time_string(slot_key) do
+      {:ok, time} -> format_time_by_locale(time)
+      {:error, _reason} -> slot_key
+    end
+  end
+
+  @doc """
+  Gets month and year display string: "September 2026", "Leden 2026".
   """
   @spec get_month_year_display(integer(), integer()) :: String.t()
   def get_month_year_display(year, month) do
-    month_name = get_month_name(month)
-    dgettext("booking", "%{month} %{year}", month: month_name, year: year)
+    LocaleFormat.format_month_year(month, year, current_locale())
   end
 
   @doc """
@@ -301,6 +382,9 @@ defmodule TymeslotWeb.Themes.Shared.LocalizationHelpers do
   Returns "March 2026" when the week falls within a single month,
   "March - April 2026" when it spans two months in the same year,
   or "December 2025 - January 2026" when it spans a year boundary.
+
+  Months are the standalone form, and only the heading's first letter is
+  capitalised: French reads "Septembre – octobre 2026".
   """
   @spec get_week_display(Date.t()) :: String.t()
   def get_week_display(week_start) do
@@ -308,24 +392,25 @@ defmodule TymeslotWeb.Themes.Shared.LocalizationHelpers do
 
     cond do
       week_start.month == week_end.month ->
-        dgettext("booking", "%{month} %{year}",
-          month: get_month_name(week_start.month),
-          year: week_start.year
-        )
+        get_month_year_display(week_start.year, week_start.month)
 
       week_start.year == week_end.year ->
-        dgettext("booking", "%{start_month} - %{end_month} %{year}",
-          start_month: get_month_name(week_start.month),
-          end_month: get_month_name(week_end.month),
-          year: week_start.year
+        LocaleFormat.capitalize_first(
+          dgettext("booking", "%{start_month} - %{end_month} %{year}",
+            start_month: standalone_month(week_start.month),
+            end_month: standalone_month(week_end.month),
+            year: week_start.year
+          )
         )
 
       true ->
-        dgettext("booking", "%{start_month} %{start_year} - %{end_month} %{end_year}",
-          start_month: get_month_name(week_start.month),
-          start_year: week_start.year,
-          end_month: get_month_name(week_end.month),
-          end_year: week_end.year
+        LocaleFormat.capitalize_first(
+          dgettext("booking", "%{start_month} %{start_year} - %{end_month} %{end_year}",
+            start_month: standalone_month(week_start.month),
+            start_year: week_start.year,
+            end_month: standalone_month(week_end.month),
+            end_year: week_end.year
+          )
         )
     end
   end

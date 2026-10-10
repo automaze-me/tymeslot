@@ -29,9 +29,10 @@ defmodule Tymeslot.Integrations.Calendar.Zimbra.Provider do
   @impl Tymeslot.Integrations.Calendar.Provider
   def connection_test_bucket, do: :caldav
 
-  @doc "Returns the LiveComponent module for provider configuration UI"
+  @doc "Returns the component module that renders the CalDAV-family configuration form"
   @spec setup_component() :: module()
-  def setup_component, do: TymeslotWeb.Components.Dashboard.Integrations.Calendar.ZimbraConfig
+  def setup_component,
+    do: TymeslotWeb.Components.Dashboard.Integrations.Calendar.CaldavFamilyConfig
 
   @impl Tymeslot.Integrations.Calendar.Provider
   def config_schema do
@@ -93,18 +94,11 @@ defmodule Tymeslot.Integrations.Calendar.Zimbra.Provider do
 
   @impl Tymeslot.Integrations.Calendar.Provider
   def new(config) do
-    CaldavCommon.build_client(
-      %{
-        base_url: normalize_base_url(config[:base_url]),
-        username: config[:username],
-        password: config[:password],
-        calendar_paths: build_zimbra_calendar_paths(config),
-        verify_ssl: true,
-        connection_timeout: config[:connection_timeout] || 10_000,
-        request_timeout: config[:request_timeout] || 30_000,
-        discovery_timeout: config[:discovery_timeout] || 15_000
-      },
-      provider: :zimbra
+    CaldavCommon.build_provider_client(
+      config,
+      :zimbra,
+      normalize_base_url(config[:base_url]),
+      build_zimbra_calendar_paths(config)
     )
   end
 
@@ -163,6 +157,9 @@ defmodule Tymeslot.Integrations.Calendar.Zimbra.Provider do
 
   @impl Tymeslot.Integrations.Calendar.Provider
   def fetch_event(client, event_ref), do: CaldavCommon.fetch_event(client, event_ref)
+
+  @impl Tymeslot.Integrations.Calendar.Provider
+  def find_moved_event(client, event_ref), do: CaldavCommon.find_moved_event(client, event_ref)
 
   @impl Tymeslot.Integrations.Calendar.Provider
   def list_events(client, opts), do: CaldavCommon.list_events(client, opts)

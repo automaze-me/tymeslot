@@ -107,13 +107,8 @@ if config_env() == :prod do
       LoggerJSON.Formatters.Basic.new(metadata: {:all_except, [:conn, :socket, :mfa, :pid, :gl]})
 
   # Database configuration based on deployment type (define early as it's used for URL scheme)
-  # Defaults to "docker" if DEPLOYMENT_TYPE is not set or unknown
-  deployment_type =
-    case System.get_env("DEPLOYMENT_TYPE") do
-      "cloudron" -> "cloudron"
-      "main" -> "cloudron"
-      _ -> "docker"
-    end
+  # "cloudron" or the legacy "main"; "docker" if DEPLOYMENT_TYPE is unset or unknown
+  deployment_type = Tymeslot.Infrastructure.DeploymentType.current()
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you
@@ -297,7 +292,11 @@ if config_env() == :prod do
         {"30 4 * * *", Tymeslot.Workers.AnalyticsReconciliationWorker},
         # Run every 15 min to release approval requests whose deadline passed
         # and whose per-meeting expiry job never fired
-        {"*/15 * * * *", Tymeslot.Meetings.Workers.ApprovalSweepWorker}
+        {"*/15 * * * *", Tymeslot.Meetings.Workers.ApprovalSweepWorker},
+        # Run daily at 03:05 UTC to resolve quiet errors and prune old ones
+        {"5 3 * * *", Tymeslot.Workers.ErrorTrackerMaintenanceWorker},
+        # Run daily at 07:00 UTC to email the digest of info-severity admin alerts
+        {"0 7 * * *", Tymeslot.Workers.AdminAlertDigestWorker}
       ]
     ]
 
@@ -351,35 +350,6 @@ if config_env() == :prod do
     end
 
   config :tymeslot, Tymeslot.Mailer, mailer_config
-
-  # Analytics fingerprint salt secret — keys the cookie-less daily visitor hash
-  # and must never leave the server. It is required ONLY when booking analytics
-  # is enabled (`config :tymeslot, :booking_analytics_enabled, true`); self-hosters
-  # who never opt into analytics are not forced to set it.
-  #
-  # When the feature IS enabled we fail fast at boot rather than silently fall
-  # back to a weak, per-restart-random salt: an unstable salt would re-hash the
-  # same visitor across deployments and corrupt unique-visitor counts. The
-  # secret must be a single, high-entropy value that stays constant for the life
-  # of the deployment (generate once with `openssl rand -base64 48`).
-  if Application.get_env(:tymeslot, :booking_analytics_enabled, false) do
-    config :tymeslot,
-           :analytics_salt_secret,
-           System.get_env("ANALYTICS_SALT_SECRET") ||
-             raise("""
-             missing ANALYTICS_SALT_SECRET environment variable
-
-             Booking analytics is enabled (config :tymeslot, :booking_analytics_enabled, true)
-             but ANALYTICS_SALT_SECRET is not set. This secret keys the cookie-less
-             visitor fingerprint and must be a stable, high-entropy value that does
-             not change between deployments. Generate one once with:
-
-                 openssl rand -base64 48
-
-             and set it as a persistent environment variable. If you do not want
-             booking analytics, leave it disabled and this variable is not required.
-             """)
-  end
 end
 
 # Configure mailer for non-production, non-test environments. `config/test.exs`
@@ -447,6 +417,29 @@ config :tymeslot, :email,
     System.get_env("PHX_HOST") ||
       System.get_env("CLOUDRON_APP_DOMAIN") ||
       "tymeslot.app"
+
+# Error tracking: every exception, crash and discarded job is stored in the
+# application database (ErrorTracker) with its request, LiveView or job
+# context. On by default; ERROR_TRACKING_ENABLED=false switches recording off
+# everywhere, crash reporting included, and stops new-error alerts with it.
+# Unset leaves the compile-time default (on; off under test). A value that is
+# neither on nor off fails the boot rather than guess which the operator meant.
+case System.get_env("ERROR_TRACKING_ENABLED") do
+  value when value in [nil, ""] ->
+    :ok
+
+  value ->
+    case String.downcase(String.trim(value)) do
+      on when on in ["true", "1", "yes", "on"] ->
+        config :error_tracker, enabled: true
+
+      off when off in ["false", "0", "no", "off"] ->
+        config :error_tracker, enabled: false
+
+      _other ->
+        raise "ERROR_TRACKING_ENABLED must be true or false, got: #{inspect(value)}"
+    end
+end
 
 # Admin alerts — disabled by default. Self-hosters can opt in by setting
 # ADMIN_ALERTS_ENABLED=true and ADMIN_ALERT_EMAIL=<recipient>. Both must be
@@ -643,7 +636,15 @@ oauth_token_url =
 oauth_userinfo_url =
   System.get_env("OAUTH_USERINFO_URL") || System.get_env("CLOUDRON_OIDC_PROFILE_ENDPOINT")
 
+# The label on the sign-in button. Only Cloudron supplies one (the name the
+# Cloudron admin gave its identity provider), and it applies only when the
+# credentials are Cloudron's too; otherwise the button reads "SSO".
+oauth_provider_name =
+  if System.get_env("OAUTH_CLIENT_ID") == nil,
+    do: System.get_env("CLOUDRON_OIDC_PROVIDER_NAME")
+
 config :tymeslot, :oauth_provider,
+  name: oauth_provider_name,
   client_id: oauth_client_id,
   client_secret: oauth_client_secret,
   site: oauth_provider_url,

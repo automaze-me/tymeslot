@@ -8,6 +8,7 @@ defmodule TymeslotWeb.Components.FlagHelpers do
   require Logger
 
   alias Phoenix.LiveView.TagEngine
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Timezones
 
   @doc """
@@ -38,7 +39,7 @@ defmodule TymeslotWeb.Components.FlagHelpers do
       # Log missing flag for monitoring
       if assigns.country_code do
         Logger.warning("Missing flag for country code",
-          country_code: inspect(assigns.country_code)
+          country_code: LogFormat.reason(assigns.country_code)
         )
       end
 
@@ -120,7 +121,9 @@ defmodule TymeslotWeb.Components.FlagHelpers do
     "uk" => :ukr,
     "fr" => :fra,
     "it" => :ita,
-    "cs" => :cze
+    "cs" => :cze,
+    "pl" => :pol,
+    "pt" => :bra
   }
 
   defp locale_to_country_code(locale), do: Map.get(@locale_countries, locale)

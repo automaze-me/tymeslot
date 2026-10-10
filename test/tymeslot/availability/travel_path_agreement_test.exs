@@ -32,7 +32,8 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
       insert(:availability_schedule,
         profile: profile,
         is_default: true,
-        buffer_minutes: 0,
+        buffer_before_minutes: 0,
+        buffer_after_minutes: 0,
         min_advance_hours: 0,
         advance_booking_days: 365
       )

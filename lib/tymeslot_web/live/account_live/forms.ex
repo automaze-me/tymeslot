@@ -6,7 +6,7 @@ defmodule TymeslotWeb.AccountLive.Forms do
   use Phoenix.Component
   use Gettext, backend: TymeslotWeb.Gettext
   alias Tymeslot.Validation.Constraints
-  import TymeslotWeb.Components.CoreComponents
+  use TymeslotWeb.Components.CoreComponents
 
   @doc """
   Renders the email change form.
@@ -17,7 +17,7 @@ defmodule TymeslotWeb.AccountLive.Forms do
   @spec email_form(map()) :: Phoenix.LiveView.Rendered.t()
   def email_form(assigns) do
     ~H"""
-    <form id="account-email-form" phx-submit="update_email" class="space-y-4">
+    <form id="account-email-form" phx-submit="update_email" class="space-y-4" novalidate>
       <.input
         name="email_form[new_email]"
         type="email"
@@ -57,7 +57,7 @@ defmodule TymeslotWeb.AccountLive.Forms do
   @spec password_form(map()) :: Phoenix.LiveView.Rendered.t()
   def password_form(assigns) do
     ~H"""
-    <form id="account-password-form" phx-submit="update_password" class="space-y-4">
+    <form id="account-password-form" phx-submit="update_password" class="space-y-4" novalidate>
       <.input
         name="password_form[current_password]"
         type="password"
@@ -125,16 +125,9 @@ defmodule TymeslotWeb.AccountLive.Forms do
   def submit_button(assigns) do
     ~H"""
     <div class="flex justify-end">
-      <button type="submit" disabled={@saving} class="btn btn-primary">
-        <%= if @saving do %>
-          <span class="flex items-center">
-            <.spinner />
-            {@loading_text}...
-          </span>
-        <% else %>
-          {@text}
-        <% end %>
-      </button>
+      <.loading_button type="submit" loading={@saving} loading_text={"#{@loading_text}..."}>
+        {@text}
+      </.loading_button>
     </div>
     """
   end

@@ -52,6 +52,56 @@ defmodule Tymeslot.Meetings.MeetingSchemaTest do
     end
   end
 
+  describe "calendar_uid" do
+    # The uid is the booking's cancel/reschedule capability; the calendar uid
+    # is what external calendars see, so it must not be derivable from it.
+    test "a new meeting gets a calendar uid of its own" do
+      cs = Meeting.changeset(%Meeting{}, @valid_base_attrs)
+
+      assert cs.valid?
+      calendar_uid = Changeset.get_change(cs, :calendar_uid)
+      assert {:ok, _uuid} = UUID.cast(calendar_uid)
+      refute calendar_uid == @valid_base_attrs.uid
+    end
+
+    test "two new meetings never share one" do
+      first = Meeting.changeset(%Meeting{}, @valid_base_attrs)
+      second = Meeting.changeset(%Meeting{}, @valid_base_attrs)
+
+      refute Changeset.get_change(first, :calendar_uid) ==
+               Changeset.get_change(second, :calendar_uid)
+    end
+
+    # Rotating it would orphan the event already written under it; a
+    # reschedule has to update that event, not lose it.
+    test "an existing meeting keeps its calendar uid through an update" do
+      meeting = insert(:meeting)
+
+      {:ok, updated} =
+        meeting
+        |> Meeting.changeset(%{
+          start_time: DateTime.add(meeting.start_time, 3600, :second),
+          end_time: DateTime.add(meeting.end_time, 3600, :second)
+        })
+        |> Repo.update()
+
+      assert updated.calendar_uid == meeting.calendar_uid
+    end
+
+    test "is unique across meetings" do
+      existing = insert(:meeting)
+
+      assert {:error, changeset} =
+               %Meeting{}
+               |> Meeting.changeset(
+                 Map.put(@valid_base_attrs, :calendar_uid, existing.calendar_uid)
+               )
+               |> Repo.insert()
+
+      assert {"has already been taken", _meta} = changeset.errors[:calendar_uid]
+    end
+  end
+
   describe "provider_event_id" do
     test "accepts an id at Google's 1024-character maximum" do
       attrs = Map.put(@valid_base_attrs, :provider_event_id, String.duplicate("a", 1024))
@@ -123,6 +173,22 @@ defmodule Tymeslot.Meetings.MeetingSchemaTest do
       changeset = Meeting.changeset(%Meeting{}, %{status: "not_a_real_status"})
 
       assert "is invalid" in errors_on(changeset).status
+    end
+  end
+
+  describe "venue" do
+    # A venue can be deleted between a booking resolving it and the meeting
+    # row being written.
+    test "a venue that no longer exists is a changeset error, not a raise" do
+      venue = insert(:venue)
+      Repo.delete!(venue)
+
+      assert {:error, changeset} =
+               %Meeting{}
+               |> Meeting.changeset(Map.put(@valid_base_attrs, :venue_id, venue.id))
+               |> Repo.insert()
+
+      assert {"does not exist", _meta} = changeset.errors[:venue_id]
     end
   end
 end

@@ -3,13 +3,14 @@ defmodule Tymeslot.Availability.OwnerFrame do
   The owner's timezone and hours in effect on a single date.
 
   One function answers "which clock is the owner on, and which hours do they
-  offer, on date D". `BusinessHours.get_business_hours_in_timezone/5` calls it,
-  and because every availability path — the booking page's slot list, the month
-  grid, the range availability map and the booking-time re-check in
-  `Tymeslot.Bookings.ScheduleCheck` — resolves a day's window through that one
-  function, all of them inherit travel periods without each having to remember
-  to. That is deliberate: the offered slots and the re-check that validates a
-  submission must never disagree.
+  offer, on date D". `BusinessHours.owner_windows/4` calls it for every owner
+  date it resolves (and `time_off_intervals/4` and `business_day?/3` for the
+  clock they read on), and because every availability path — the booking
+  page's slot list, the month grid, the range availability map and the
+  booking-time re-check in `Tymeslot.Bookings.ScheduleCheck` — resolves a
+  day's window through that one function, all of them inherit travel periods
+  without each having to remember to. That is deliberate: the offered slots
+  and the re-check that validates a submission must never disagree.
 
   Named for the "owner frame" vocabulary `Tymeslot.Availability.TimeSlots`
   already uses for the owner-side date a window was read for.
@@ -50,6 +51,21 @@ defmodule Tymeslot.Availability.OwnerFrame do
         %{timezone: period.timezone, day: day_for(period, date), source: :travel}
     end
   end
+
+  @doc """
+  The zones the travel periods prefetched into `config` put the owner in.
+
+  `Tymeslot.Availability.SlotGrid` reads the owner dates around a booker's
+  day in each of these as well as the home zone, so a trip's window that
+  reaches into the day is read even when the trip zone's date and the home
+  zone's date for it differ. Only a prefetched list is consulted: every slot
+  path prefetches its window before it gets there.
+  """
+  @spec trip_zones(map()) :: [String.t()]
+  def trip_zones(%{travel_periods: periods}) when is_list(periods),
+    do: periods |> Enum.map(& &1.timezone) |> Enum.uniq()
+
+  def trip_zones(_config), do: []
 
   # An explicit list wins, including an empty one: a caller that prefetched a
   # window has already established there are no trips in it, and re-querying

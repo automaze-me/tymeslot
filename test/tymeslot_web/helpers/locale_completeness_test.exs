@@ -93,6 +93,14 @@ defmodule TymeslotWeb.Helpers.LocaleCompletenessTest do
           "cs" ->
             assert result =~ @nbsp, "Czech should use a non-breaking space as thousand separator"
             assert result =~ ",", "Czech should use comma as decimal separator"
+
+          "pl" ->
+            assert result =~ @nbsp, "Polish should use a non-breaking space as thousand separator"
+            assert result =~ ",", "Polish should use comma as decimal separator"
+
+          "pt" ->
+            assert result =~ ".", "Portuguese should use period as thousand separator"
+            assert result =~ ",", "Portuguese should use comma as decimal separator"
         end
       end
 

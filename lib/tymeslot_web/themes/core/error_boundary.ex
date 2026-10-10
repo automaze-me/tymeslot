@@ -9,6 +9,7 @@ defmodule TymeslotWeb.Themes.Core.ErrorBoundary do
   require Logger
 
   alias Phoenix.Component
+  alias Tymeslot.Infrastructure.ErrorTracking
 
   @type error_context :: %{
           theme_id: String.t(),
@@ -91,12 +92,10 @@ defmodule TymeslotWeb.Themes.Core.ErrorBoundary do
   end
 
   defp log_theme_error(context) do
-    Logger.error("Theme error",
+    ErrorTracking.report_error(context.error, context.stacktrace, %{
       theme_id: context.theme_id,
-      function: context.function,
-      error: inspect(context.error),
-      args: inspect(context.args)
-    )
+      function: context.function
+    })
 
     if Application.get_env(:tymeslot, :debug_theme_errors, false) do
       Logger.error("Theme error stacktrace",
@@ -105,19 +104,7 @@ defmodule TymeslotWeb.Themes.Core.ErrorBoundary do
     end
   end
 
-  defp assign_error(socket, context) do
-    socket
-    |> Component.assign(:theme_error, context)
-    |> Component.assign(:theme_error_message, format_error(context))
-  end
-
-  @doc """
-  Formats an error context into a human-readable message.
-  """
-  @spec format_error(map()) :: String.t()
-  def format_error(%{function: :mount}), do: "Failed to load theme"
-  def format_error(%{function: :handle_params}), do: "Navigation error in theme"
-  def format_error(%{function: :handle_event}), do: "Event handling error in theme"
-  def format_error(%{function: :handle_info}), do: "Message handling error in theme"
-  def format_error(_context), do: "An error occurred in the theme"
+  # The context is for diagnostics only: the dispatcher shows the visitor a
+  # generic, translated card whichever callback failed.
+  defp assign_error(socket, context), do: Component.assign(socket, :theme_error, context)
 end

@@ -36,7 +36,10 @@ defmodule TymeslotWeb.Live.Scheduling.Handlers.BookingSubmissionHandlerComponent
   alias Tymeslot.Bookings.DemoOrchestrator
   alias Tymeslot.CustomFields
   alias Tymeslot.Demo
+  alias Tymeslot.Infrastructure.Logging.LogFormat
+  alias Tymeslot.Meetings
   alias Tymeslot.Meetings.Approval
+  alias Tymeslot.Security.Honeypot
   alias Tymeslot.Security.InputProcessor
   alias TymeslotWeb.Live.Scheduling.AvailabilityHelpers
   alias TymeslotWeb.Live.Scheduling.BookingConfig
@@ -91,7 +94,9 @@ defmodule TymeslotWeb.Live.Scheduling.Handlers.BookingSubmissionHandlerComponent
   def submit_booking(socket, booking_params) do
     Logger.info("Submit event triggered for booking form")
 
-    if BookingGuards.honeypot_tripped?(booking_params) do
+    # The cheapest gate, checked before validation: a tripped honeypot means
+    # nothing else about the submission is worth processing.
+    if Honeypot.tripped?(booking_params) do
       {:honeypot, BookingGuards.handle_honeypot(socket)}
     else
       case InputProcessor.validate_form(booking_params, BookingConfig.booking_field_spec()) do
@@ -100,7 +105,7 @@ defmodule TymeslotWeb.Live.Scheduling.Handlers.BookingSubmissionHandlerComponent
           validate_and_submit(socket, sanitized_params, booking_params)
 
         {:error, errors} ->
-          Logger.warning("Form validation failed", errors: inspect(errors))
+          Logger.warning("Form validation failed", errors: LogFormat.reason(errors))
 
           socket =
             socket
@@ -142,8 +147,9 @@ defmodule TymeslotWeb.Live.Scheduling.Handlers.BookingSubmissionHandlerComponent
     socket =
       socket
       |> assign(:submitting, false)
-      |> assign(:meeting_uid, meeting.uid)
+      |> assign_booked_identity(meeting)
       |> assign(:meeting_status, meeting.status)
+      |> BookingLocation.assign_booked(meeting)
       |> assign(:name, validated_data["name"])
       |> assign(:email, validated_data["email"])
       |> assign(:custom_fields_snapshot, Map.get(validated_data, "custom_fields_snapshot", []))
@@ -152,6 +158,23 @@ defmodule TymeslotWeb.Live.Scheduling.Handlers.BookingSubmissionHandlerComponent
       |> Flash.put_flash(:info, success_message)
 
     {:ok, socket}
+  end
+
+  # A seat on a group meeting is the booker's own booking: its calendar file
+  # is the seat's, under its management token. The meeting uid of a group
+  # meeting names the shared slot, which a booker must never be handed: it
+  # opens the slot's public cancel and reschedule pages.
+  defp assign_booked_identity(socket, meeting) do
+    {meeting_uid, seat_calendar_url} =
+      case Meetings.booker_calendar(meeting) do
+        {:meeting, uid} -> {uid, nil}
+        {:seat, url} -> {nil, url}
+        :none -> {nil, nil}
+      end
+
+    socket
+    |> assign(:meeting_uid, meeting_uid)
+    |> assign(:seat_calendar_url, seat_calendar_url)
   end
 
   # Handles booking submission errors: updates the socket with the
@@ -164,7 +187,7 @@ defmodule TymeslotWeb.Live.Scheduling.Handlers.BookingSubmissionHandlerComponent
       |> BookingGuards.release_submission()
       |> Flash.put_flash(:error, BookingErrorMessage.message(reason))
 
-    Logger.error("Failed to create meeting appointment", reason: inspect(reason))
+    Logger.error("Failed to create meeting appointment", reason: LogFormat.reason(reason))
 
     {:error, socket}
   end
@@ -186,7 +209,7 @@ defmodule TymeslotWeb.Live.Scheduling.Handlers.BookingSubmissionHandlerComponent
       process_booking_submission(socket, enriched_params)
     else
       {:error, field_errors} when is_map(field_errors) and not is_struct(field_errors) ->
-        Logger.warning("Custom field validation failed", errors: inspect(field_errors))
+        Logger.warning("Custom field validation failed", errors: LogFormat.reason(field_errors))
 
         socket =
           socket
@@ -217,6 +240,7 @@ defmodule TymeslotWeb.Live.Scheduling.Handlers.BookingSubmissionHandlerComponent
     opts = [
       is_rescheduling: socket.assigns[:is_rescheduling] || false,
       reschedule_uid: socket.assigns[:reschedule_meeting_uid],
+      reschedule_seat_token: socket.assigns[:reschedule_seat_token],
       organizer_user_id: socket.assigns[:organizer_user_id]
     ]
 
@@ -364,12 +388,14 @@ defmodule TymeslotWeb.Live.Scheduling.Handlers.BookingSubmissionHandlerComponent
       custom_field_answers: Map.get(sanitized_params, "custom_field_answers", %{}),
       guest_emails: socket.assigns[:guest_emails] || [],
       # Only the chosen option's id travels, with the provider picked within a
-      # video option. What they mean is re-derived from the host's own meeting
-      # type in `Bookings.Policy`, so a forged id resolves to a location, or a
-      # provider, the host already offers.
+      # video option or the venue picked within an in-person one. What they
+      # mean is re-derived from the host's own meeting type in
+      # `Bookings.Policy`, so a forged id resolves to a location, a provider or
+      # a venue the host already offers.
       location_option_id: BookingLocation.submitted_option_id(socket.assigns),
       location_phone: socket.assigns[:location_phone],
-      location_video_integration_id: BookingLocation.submitted_video_id(socket.assigns)
+      location_video_integration_id: BookingLocation.submitted_video_id(socket.assigns),
+      location_venue_id: BookingLocation.submitted_venue_id(socket.assigns)
     }
   end
 

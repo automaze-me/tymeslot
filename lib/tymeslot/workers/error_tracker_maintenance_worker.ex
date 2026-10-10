@@ -1,0 +1,120 @@
+defmodule Tymeslot.Workers.ErrorTrackerMaintenanceWorker do
+  @moduledoc """
+  Daily housekeeping for ErrorTracker, which runs storage-only: there is no
+  dashboard, so nobody resolves an error by hand, and without this job every
+  error would stay unresolved and every occurrence would be kept forever.
+
+  Each run, with `window` being `:error_tracking_resolve_after_days`:
+
+  1. **Resolve.** An unresolved error not seen for `window` days is marked
+     resolved. Should it happen again, ErrorTracker moves it back to
+     unresolved and emits its regression event, which raises an admin alert
+     through `Tymeslot.Infrastructure.ErrorTracking.Alerter`. Muted errors
+     are resolved too: the mute still silences a regression, and a muted
+     error that has gone quiet is as finished as any other. The one cost is
+     that once the error is pruned (step 2) its mute goes with it, so an
+     occurrence after that raises a fresh "new error" alert; after two
+     quiet windows that is a reasonable thing to hear about.
+
+  2. **Prune.** Resolved errors are deleted with their occurrences through
+     `ErrorTracker.Plugins.Pruner.prune_errors/1`. The pruner measures age
+     from `last_occurrence_at`, not from when the error was resolved (the
+     schema records no resolved-at), so passing the same window would delete
+     an error in the very run that resolved it, and a recurrence would then
+     arrive as a new error with no history instead of a regression. The
+     prune age is therefore two windows: an auto-resolved error stays
+     resolved, and visible as a regression if it returns, for one full
+     window before it is deleted.
+
+  3. **Trim.** An unresolved error that keeps recurring is never resolved,
+     so its occurrences are trimmed instead: those older than the window go,
+     except the newest `:error_tracking_occurrences_kept` of the error,
+     which are always kept whatever their age. Inside the window an error
+     keeps at most its newest `:error_tracking_occurrences_max`, so a
+     chronic failure cannot fill the table for a month before it ages out.
+
+  4. **Re-mask.** The reasons stored in the last two days are masked again
+     by `ReasonScrubber.rescrub_since/1`, for any report whose masking after
+     the insert failed. Two days rather than one, so a missed run leaves no
+     gap. It runs after the trim, which bounds how many occurrences it reads.
+
+  Once per version of the masking rules, a separate job of this worker masks
+  every reason still stored, whatever its age (`enqueue_full_remask/0`,
+  called at every boot): a reason stored under older rules, or whose masking
+  after the insert failed outside the two days, would otherwise stay as it
+  was for as long as the error keeps recurring.
+
+  The tunables are read on every run, so `config/runtime.exs` can set them.
+  Maintenance runs whether or not error tracking is switched on
+  (`ERROR_TRACKING_ENABLED`): what was stored before it was switched off
+  still ages out on the same schedule.
+  """
+
+  use Oban.Worker, queue: :default, max_attempts: 3, unique: [period: 3600]
+
+  require Logger
+
+  alias Tymeslot.Infrastructure.ErrorTracking.ErrorTrackingQueries
+  alias Tymeslot.Infrastructure.ErrorTracking.ReasonScrubber
+
+  @remask_hours 48
+
+  @doc """
+  Enqueues the job that masks every stored reason again under the current
+  rules (`ReasonScrubber.rules_version/0`), unless one was already enqueued
+  for them, in any state. Called at every boot, so the first boot under new
+  rules runs it and later ones do nothing.
+
+  The pruner deletes a finished job after its `max_age`, so a boot after
+  that runs it again; re-masking a reason already masked changes nothing,
+  so the only cost is the read.
+  """
+  @spec enqueue_full_remask() :: {:ok, Oban.Job.t()} | {:error, term()}
+  def enqueue_full_remask do
+    %{rules_version: ReasonScrubber.rules_version()}
+    |> new(unique: [period: :infinity, states: :all, keys: [:rules_version]])
+    |> Oban.insert()
+  end
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"rules_version" => rules_version}}) do
+    remasked = ReasonScrubber.rescrub_since(DateTime.from_unix!(0))
+
+    Logger.info("ErrorTracker reasons re-masked under the current masking rules",
+      rules_version: rules_version,
+      reasons_remasked: remasked
+    )
+
+    :ok
+  end
+
+  def perform(_job) do
+    # Read at run time rather than compiled in, so `config/runtime.exs` can
+    # tune them without a rebuild.
+    resolve_after_days = Application.get_env(:tymeslot, :error_tracking_resolve_after_days, 30)
+    cutoff = DateTime.add(DateTime.utc_now(), -resolve_after_days, :day)
+
+    resolved = ErrorTrackingQueries.resolve_last_seen_before(cutoff)
+    pruned = ErrorTrackingQueries.prune_resolved(:timer.hours(24 * 2 * resolve_after_days))
+
+    trimmed =
+      ErrorTrackingQueries.trim_unresolved_occurrences(
+        cutoff,
+        Application.get_env(:tymeslot, :error_tracking_occurrences_kept, 50),
+        Application.get_env(:tymeslot, :error_tracking_occurrences_max, 1_000)
+      )
+
+    remasked =
+      ReasonScrubber.rescrub_since(DateTime.add(DateTime.utc_now(), -@remask_hours, :hour))
+
+    Logger.info("ErrorTracker maintenance completed",
+      errors_resolved: resolved,
+      errors_pruned: pruned,
+      occurrences_trimmed: trimmed,
+      reasons_remasked: remasked,
+      resolve_after_days: resolve_after_days
+    )
+
+    :ok
+  end
+end

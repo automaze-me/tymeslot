@@ -7,9 +7,10 @@ defmodule Tymeslot.Security.SecurityLoggerTest do
 
   @moduletag :security
 
+  @redactor_filter :tymeslot_metadata_redactor
+
   import Mox, only: [verify_on_exit!: 1]
 
-  alias Tymeslot.Infrastructure.Logging.MetadataRedactor
   alias Tymeslot.Security.SecurityLogger
   alias Tymeslot.Test.LogCapture
 
@@ -21,12 +22,16 @@ defmodule Tymeslot.Security.SecurityLoggerTest do
   # it. Lift it here so these tests observe what SecurityLogger itself emits;
   # that global belt-and-braces layer has its own tests.
   defp capture_security_logs(fun) do
-    _previous = :logger.remove_primary_filter(:tymeslot_metadata_redactor)
+    previous =
+      :logger.get_primary_config() |> Map.fetch!(:filters) |> Keyword.get(@redactor_filter)
+
+    _removed = :logger.remove_primary_filter(@redactor_filter)
 
     try do
       LogCapture.with_capture([logger_level: :info], fun)
     after
-      MetadataRedactor.attach()
+      # Put back exactly what was installed, and nothing when nothing was.
+      if previous, do: :ok = :logger.add_primary_filter(@redactor_filter, previous)
     end
   end
 
@@ -123,6 +128,25 @@ defmodule Tymeslot.Security.SecurityLoggerTest do
       assert meta.email_masked == "x***@y.com"
       assert meta.ip_address == nil
       assert meta.user_agent == nil
+    end
+
+    # Through the installed redactor, as production writes it: the line keeps
+    # the visitor's network for telling traffic apart, never the address.
+    test "never writes a full client address, IPv4 or IPv6" do
+      LogCapture.with_capture([logger_level: :info], fn ->
+        for ip <- ["203.0.113.77", "2001:db8:85a3:8d3:1319:8a2e:370:7348"] do
+          SecurityLogger.log_authentication_attempt("alice@example.com", false, "bad_password", %{
+            ip_address: ip
+          })
+        end
+      end)
+
+      logged =
+        LogCapture.drain()
+        |> Enum.filter(&(&1.meta[:event_type] == "authentication_failure"))
+        |> Enum.map(& &1.meta.ip_address)
+
+      assert logged == ["203.0.113.0/24", "2001:db8:85a3::/48"]
     end
   end
 

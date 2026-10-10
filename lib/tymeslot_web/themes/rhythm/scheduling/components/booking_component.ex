@@ -68,6 +68,12 @@ defmodule TymeslotWeb.Themes.Rhythm.Scheduling.Components.BookingComponent do
   end
 
   @impl Phoenix.LiveComponent
+  def handle_event("select_venue", %{"id" => id}, socket) do
+    send(self(), {:step_event, :booking, :select_venue, id})
+    {:noreply, socket}
+  end
+
+  @impl Phoenix.LiveComponent
   def handle_event("location_phone_change", params, socket) do
     send(self(), {:step_event, :booking, :location_phone, params["location_phone"] || ""})
     {:noreply, socket}
@@ -105,6 +111,8 @@ defmodule TymeslotWeb.Themes.Rhythm.Scheduling.Components.BookingComponent do
 
   @impl Phoenix.LiveComponent
   def render(assigns) do
+    assigns = assign(assigns, :next_day_end, LocalizationHelpers.booking_next_day_end(assigns))
+
     ~H"""
     <div class="scheduling-box" data-locale={@locale}>
       <div class="slide-container">
@@ -125,7 +133,11 @@ defmodule TymeslotWeb.Themes.Rhythm.Scheduling.Components.BookingComponent do
                   <div>
                     <div class="summary-value">{LocalizationHelpers.format_date(@selected_date)}</div>
                     <div class="summary-label">
-                      {@selected_time || dgettext("booking", "No time selected")}
+                      {LocalizationHelpers.format_slot_label(@selected_time) ||
+                        dgettext("booking", "No time selected")}
+                    </div>
+                    <div :if={@next_day_end} class="summary-label" data-testid="booking-next-day-end">
+                      {@next_day_end}
                     </div>
                   </div>
                 </div>
@@ -159,10 +171,19 @@ defmodule TymeslotWeb.Themes.Rhythm.Scheduling.Components.BookingComponent do
               selected_location_id={@selected_location_id}
               video_choices={BookingLocation.video_choices(assigns)}
               selected_video_id={@selected_video_id}
+              venue_choices={BookingLocation.venue_choices(assigns)}
+              selected_venue_id={@selected_venue_id}
+              kept_location={BookingLocation.kept_location(assigns)}
               location_phone={@location_phone}
               location_error={@location_error}
               phone_required={BookingLocation.phone_required?(assigns)}
               target={@myself}
+            />
+
+            <LocationField.stated_location
+              :if={BookingLocation.stated_location?(assigns)}
+              option={BookingLocation.selected(assigns)}
+              venue_choices={BookingLocation.venue_choices(assigns)}
             />
 
             <.form
@@ -176,8 +197,9 @@ defmodule TymeslotWeb.Themes.Rhythm.Scheduling.Components.BookingComponent do
               as={:booking}
               id="booking-form"
               {SecurityFields.recaptcha_form_attrs("booking_form", "booking")}
+              novalidate
             >
-              <SecurityFields.honeypot_field id_prefix="booking" param_root="booking" />
+              <.honeypot_field id="booking-website" param_root="booking" />
 
               <.input
                 field={f[:name]}

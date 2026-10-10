@@ -4,7 +4,8 @@ defmodule Tymeslot.Meetings.MeetingQueries do
 
   This module provides a clean interface for single-record access, writes,
   and aggregate counts on meetings. Listing, filtering, and pagination
-  queries live in `Tymeslot.Meetings.MeetingListQueries`. Business logic
+  queries live in `Tymeslot.Meetings.MeetingListQueries`, and the analytics
+  aggregates in `Tymeslot.Meetings.MeetingAnalyticsQueries`. Business logic
   should be handled in the `Tymeslot.Meetings` context module.
   """
 
@@ -132,6 +133,32 @@ defmodule Tymeslot.Meetings.MeetingQueries do
   end
 
   @doc """
+  Like `get_meeting_for_organizer/2`, but takes a row lock (`FOR UPDATE`) on
+  the meeting. Must be called inside a transaction; it serialises writers that
+  read something about the meeting (its guest count, say) before changing it.
+  """
+  @spec lock_meeting_for_organizer(String.t(), integer()) ::
+          {:ok, Meeting.t()} | {:error, :not_found}
+  def lock_meeting_for_organizer(id, organizer_user_id) when is_integer(organizer_user_id) do
+    case UUID.cast(id) do
+      {:ok, uuid} ->
+        query =
+          from(m in Meeting,
+            where: m.id == ^uuid and m.organizer_user_id == ^organizer_user_id,
+            lock: "FOR UPDATE"
+          )
+
+        case Repo.one(query) do
+          nil -> {:error, :not_found}
+          meeting -> {:ok, meeting}
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
   Moves a meeting out of `"awaiting_approval"`, atomically.
 
   The guard is in the `WHERE` clause rather than read-then-write, because
@@ -204,6 +231,22 @@ defmodule Tymeslot.Meetings.MeetingQueries do
   def update_meeting(%Meeting{} = meeting, attrs) when is_map(attrs) do
     meeting
     |> Meeting.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Updates a meeting's status transition fields only (`status`,
+  `cancelled_at`, `cancellation_reason`).
+
+  Used by cancellation flows instead of `update_meeting/2`: those touch
+  only these fields, and group meetings legitimately carry no
+  `attendee_name`/`attendee_email` — fields `Meeting.changeset/2` would
+  otherwise demand.
+  """
+  @spec update_meeting_status(Meeting.t(), map()) :: {:ok, Meeting.t()} | {:error, Changeset.t()}
+  def update_meeting_status(%Meeting{} = meeting, attrs) when is_map(attrs) do
+    meeting
+    |> Meeting.status_changeset(attrs)
     |> Repo.update()
   end
 
@@ -477,18 +520,6 @@ defmodule Tymeslot.Meetings.MeetingQueries do
   end
 
   @doc """
-  Returns the count of bookings created for an organizer within the given
-  window. Used by the analytics dashboard to compute conversion rate.
-  """
-  @spec count_bookings(integer(), DateTime.t(), DateTime.t()) :: non_neg_integer()
-  def count_bookings(organizer_user_id, %DateTime{} = from, %DateTime{} = to) do
-    Meeting
-    |> where([m], m.organizer_user_id == ^organizer_user_id)
-    |> where([m], m.inserted_at >= ^from and m.inserted_at <= ^to)
-    |> Repo.aggregate(:count, :id)
-  end
-
-  @doc """
   Lists the start times (and meeting type) of an organizer's slot-occupying
   bookings whose `start_time` falls in `[from_utc, to_utc)`.
 
@@ -527,61 +558,6 @@ defmodule Tymeslot.Meetings.MeetingQueries do
       end
 
     Repo.all(query)
-  end
-
-  @doc """
-  Returns the count of bookings grouped by `utm_source` for an organizer
-  within the given window. Only returns rows where `utm_source` is set.
-  Intended as a primitive for analytics composition — callers should not
-  interpret the shape; use `Tymeslot.Analytics.attribution_table/3` instead.
-  """
-  @spec count_by_utm_source(integer(), DateTime.t(), DateTime.t()) :: [
-          %{utm_source: String.t(), bookings: non_neg_integer()}
-        ]
-  def count_by_utm_source(organizer_user_id, %DateTime{} = from, %DateTime{} = to) do
-    Meeting
-    |> where([m], m.organizer_user_id == ^organizer_user_id)
-    |> where([m], m.inserted_at >= ^from and m.inserted_at <= ^to)
-    |> where([m], not is_nil(m.utm_source))
-    |> group_by([m], m.utm_source)
-    |> select([m], %{utm_source: m.utm_source, bookings: count(m.id)})
-    |> Repo.all()
-  end
-
-  @doc """
-  Counts distinct converting visitors (meetings carrying a `visitor_hash`) for
-  an organizer within the window. See `Tymeslot.Meetings.count_converting_visitors/3`.
-  """
-  @spec count_converting_visitors(integer(), DateTime.t(), DateTime.t()) :: non_neg_integer()
-  def count_converting_visitors(organizer_user_id, %DateTime{} = from, %DateTime{} = to) do
-    Meeting
-    |> where([m], m.organizer_user_id == ^organizer_user_id)
-    |> where([m], m.inserted_at >= ^from and m.inserted_at <= ^to)
-    |> where([m], not is_nil(m.visitor_hash))
-    |> select([m], count(m.visitor_hash, :distinct))
-    |> Repo.one() || 0
-  end
-
-  @doc """
-  Returns distinct converting-visitor counts grouped by `utm_source` for an
-  organizer within the window. Only rows where both `utm_source` and
-  `visitor_hash` are set.
-  """
-  @spec converting_visitors_by_utm_source(integer(), DateTime.t(), DateTime.t()) :: [
-          %{utm_source: String.t(), converting_visitors: non_neg_integer()}
-        ]
-  def converting_visitors_by_utm_source(organizer_user_id, %DateTime{} = from, %DateTime{} = to) do
-    Meeting
-    |> where([m], m.organizer_user_id == ^organizer_user_id)
-    |> where([m], m.inserted_at >= ^from and m.inserted_at <= ^to)
-    |> where([m], not is_nil(m.utm_source))
-    |> where([m], not is_nil(m.visitor_hash))
-    |> group_by([m], m.utm_source)
-    |> select([m], %{
-      utm_source: m.utm_source,
-      converting_visitors: count(m.visitor_hash, :distinct)
-    })
-    |> Repo.all()
   end
 
   @doc """

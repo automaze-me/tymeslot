@@ -44,13 +44,15 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   # The policy settings differ only in which schedule field they write, so the
   # handlers below route through one pair of helpers driven by these tables.
   @policy_events %{
-    "update_buffer_minutes" => :buffer_minutes,
+    "update_buffer_before_minutes" => :buffer_before_minutes,
+    "update_buffer_after_minutes" => :buffer_after_minutes,
     "update_advance_booking_days" => :advance_booking_days,
     "update_min_advance_hours" => :min_advance_hours
   }
 
   @policy_settings %{
-    "buffer_minutes" => :buffer_minutes,
+    "buffer_before_minutes" => :buffer_before_minutes,
+    "buffer_after_minutes" => :buffer_after_minutes,
     "advance_booking_days" => :advance_booking_days,
     "min_advance_hours" => :min_advance_hours
   }
@@ -71,7 +73,8 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   # `CustomInputModeHelper.presets/1`, the same table the card renders its tags
   # from, so this cannot fall out of step with what the user sees.
   @policy_custom_seed %{
-    buffer_minutes: 45,
+    buffer_before_minutes: 45,
+    buffer_after_minutes: 45,
     advance_booking_days: 120,
     min_advance_hours: 12
   }
@@ -427,8 +430,11 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
     Constraints.scheduling_policy_defaults() |> Map.fetch!(field) |> to_string()
   end
 
-  defp validate_policy(:buffer_minutes, value, opts),
-    do: MeetingSettingsInputValidation.validate_buffer_minutes(value, opts)
+  defp validate_policy(:buffer_before_minutes, value, opts),
+    do: MeetingSettingsInputValidation.validate_buffer_before_minutes(value, opts)
+
+  defp validate_policy(:buffer_after_minutes, value, opts),
+    do: MeetingSettingsInputValidation.validate_buffer_after_minutes(value, opts)
 
   defp validate_policy(:advance_booking_days, value, opts),
     do: MeetingSettingsInputValidation.validate_advance_booking_days(value, opts)
@@ -436,9 +442,15 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   defp validate_policy(:min_advance_hours, value, opts),
     do: MeetingSettingsInputValidation.validate_min_advance_hours(value, opts)
 
-  defp policy_flash(:buffer_minutes, value),
+  defp policy_flash(:buffer_before_minutes, value),
     do:
-      dgettext("dashboard_availability", "Buffer time updated to %{minutes} minutes",
+      dgettext("dashboard_availability", "Buffer before meetings updated to %{minutes} minutes",
+        minutes: value
+      )
+
+  defp policy_flash(:buffer_after_minutes, value),
+    do:
+      dgettext("dashboard_availability", "Buffer after meetings updated to %{minutes} minutes",
         minutes: value
       )
 
@@ -454,8 +466,11 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
         hours: value
       )
 
-  defp custom_policy_flash(:buffer_minutes),
-    do: dgettext("dashboard_availability", "Buffer time set to custom value")
+  defp custom_policy_flash(:buffer_before_minutes),
+    do: dgettext("dashboard_availability", "Buffer before meetings set to custom value")
+
+  defp custom_policy_flash(:buffer_after_minutes),
+    do: dgettext("dashboard_availability", "Buffer after meetings set to custom value")
 
   defp custom_policy_flash(:advance_booking_days),
     do: dgettext("dashboard_availability", "Advance booking set to custom value")
@@ -467,81 +482,81 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   @spec render(map()) :: Phoenix.LiveView.Rendered.t()
   def render(assigns) do
     ~H"""
-    <div class="space-y-10 pb-20">
-      <.section_header
-        icon="hero-calendar-days"
-        title={dgettext("dashboard_availability", "Availability")}
+    <div>
+      <.dashboard_page
+        icon="hero-adjustments-horizontal"
+        title={dgettext("dashboard_common", "Availability")}
         saving={@saving}
-      />
-
-      <ScheduleSwitcher.schedule_panel
-        schedules={@schedules}
-        selected_schedule={@selected_schedule}
-        meeting_type_names={@meeting_type_names}
-        max_schedules={Schedules.max_schedules()}
-        menu_open={@schedule_menu_open}
-        myself={@myself}
       >
-        <.live_component
-          module={ListComponent}
-          id="availability-list"
-          weekly_schedule={@weekly_schedule}
-          profile={@profile}
+        <ScheduleSwitcher.schedule_panel
+          schedules={@schedules}
           selected_schedule={@selected_schedule}
-          time_format={@time_format}
-          form_errors={@form_errors}
-          client_ip={@client_ip}
-          user_agent={@user_agent}
-        />
-
-        <PolicyCard.policy_card
-          :if={@selected_schedule}
-          schedule={@selected_schedule}
+          meeting_type_names={@meeting_type_names}
+          max_schedules={Schedules.max_schedules()}
+          menu_open={@schedule_menu_open}
           myself={@myself}
-          custom_input_mode={@custom_input_mode}
-        />
-      </ScheduleSwitcher.schedule_panel>
+        >
+          <.live_component
+            module={ListComponent}
+            id="availability-list"
+            weekly_schedule={@weekly_schedule}
+            profile={@profile}
+            selected_schedule={@selected_schedule}
+            time_format={@time_format}
+            form_errors={@form_errors}
+            client_ip={@client_ip}
+            user_agent={@user_agent}
+          />
 
-      <%!-- Both sit outside the panel on purpose: a period is the profile's,
+          <PolicyCard.policy_card
+            :if={@selected_schedule}
+            schedule={@selected_schedule}
+            myself={@myself}
+            custom_input_mode={@custom_input_mode}
+          />
+        </ScheduleSwitcher.schedule_panel>
+
+        <%!-- Both sit outside the panel on purpose: a period is the profile's,
       not the selected schedule's, and inside the frame either would read as
       switching with the tabs. --%>
-      <TravelSection.travel_section periods={@travel_periods} myself={@myself} />
-      <.live_component
-        module={TimeOffCard}
-        id="availability-time-off"
-        profile={@profile}
-        time_format={@time_format}
-      />
+        <TravelSection.travel_section periods={@travel_periods} myself={@myself} />
+        <.live_component
+          module={TimeOffCard}
+          id="availability-time-off"
+          profile={@profile}
+          time_format={@time_format}
+        />
 
-      <ScheduleFormModal.schedule_form_modal
-        id="schedule-form-modal"
-        show={@show_schedule_form_modal}
-        schedule_data={@schedule_form_modal_data}
-        on_cancel={JS.push("hide_schedule_form", target: @myself)}
-        myself={@myself}
-      />
+        <ScheduleFormModal.schedule_form_modal
+          id="schedule-form-modal"
+          show={@show_schedule_form_modal}
+          schedule_data={@schedule_form_modal_data}
+          on_cancel={JS.push("hide_schedule_form", target: @myself)}
+          myself={@myself}
+        />
 
-      <DeleteModals.delete_modals
-        show_delete_schedule_modal={@show_delete_schedule_modal}
-        delete_schedule_modal_data={@delete_schedule_modal_data}
-        show_delete_travel_period_modal={@show_delete_travel_period_modal}
-        delete_travel_period_modal_data={@delete_travel_period_modal_data}
-        myself={@myself}
-      />
+        <DeleteModals.delete_modals
+          show_delete_schedule_modal={@show_delete_schedule_modal}
+          delete_schedule_modal_data={@delete_schedule_modal_data}
+          show_delete_travel_period_modal={@show_delete_travel_period_modal}
+          delete_travel_period_modal_data={@delete_travel_period_modal_data}
+          myself={@myself}
+        />
 
-      <TravelForm.travel_form_modal
-        id="travel-form-modal"
-        show={@show_travel_form}
-        period={@travel_form_period}
-        submitted={@travel_form_submitted}
-        timezone_options={Timezones.all_options()}
-        timezone={@travel_form_timezone}
-        timezone_dropdown_open={@travel_form_timezone_dropdown_open}
-        timezone_search={@travel_form_timezone_search}
-        form_errors={@travel_form_errors}
-        myself={@myself}
-        on_cancel={JS.push("hide_travel_form", target: @myself)}
-      />
+        <TravelForm.travel_form_modal
+          id="travel-form-modal"
+          show={@show_travel_form}
+          period={@travel_form_period}
+          submitted={@travel_form_submitted}
+          timezone_options={Timezones.all_options()}
+          timezone={@travel_form_timezone}
+          timezone_dropdown_open={@travel_form_timezone_dropdown_open}
+          timezone_search={@travel_form_timezone_search}
+          form_errors={@travel_form_errors}
+          myself={@myself}
+          on_cancel={JS.push("hide_travel_form", target: @myself)}
+        />
+      </.dashboard_page>
     </div>
     """
   end

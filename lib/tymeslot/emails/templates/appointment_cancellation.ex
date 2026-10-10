@@ -2,6 +2,11 @@ defmodule Tymeslot.Emails.Templates.AppointmentCancellation do
   @moduledoc """
   Email module for sending appointment cancellation notifications.
 
+  A group participant who gave up their own spot (`:seat_given_up`, set by
+  `Tymeslot.Workers.EmailWorkerHandlers.SeatEmails`) gets their own wording:
+  they cancelled, not the host, and the meeting goes on for the others, so
+  there is no apology and no "this time is free again".
+
   Guests get their own variant: it only states that the meeting they were
   invited to will not take place, without the booker's invitation to book
   again, and its ICS attachment marks the entry in their calendar cancelled.
@@ -30,13 +35,68 @@ defmodule Tymeslot.Emails.Templates.AppointmentCancellation do
   # A cancellation email communicates a negative state change.
   @intent :cancelled
 
+  # Every audience gets the details without the arranged-after-booking
+  # note: a cancelled meeting has no address left to arrange.
   @spec render(
           :attendee | :organizer | :guest,
           String.t(),
           Tymeslot.Emails.EmailService.appointment_details()
         ) ::
           Swoosh.Email.t()
+  def render(:attendee, attendee_email, %{seat_given_up: true} = appointment_details) do
+    appointment_details = Formatting.without_location_note(appointment_details)
+    locale = Map.get(appointment_details, :attendee_locale, "en")
+
+    Gettext.with_locale(TymeslotWeb.Gettext, locale, fn ->
+      meeting_details = %{
+        date: appointment_details.date,
+        start_time: appointment_details.start_time_attendee_tz,
+        duration: appointment_details.duration,
+        location: appointment_details.location,
+        location_type: Map.get(appointment_details, :location_type),
+        meeting_type: appointment_details.meeting_type,
+        timezone: appointment_details.attendee_timezone
+      }
+
+      mjml_content = """
+      #{Text.centered_text(seat_given_up_intro(appointment_details, locale), padding: "8px 0 16px 0")}
+
+      #{MeetingComponents.meeting_details_table(meeting_details, locale)}
+
+      #{Text.centered_text(dgettext("emails_booking", "Would you like to book another time?"), padding: "24px 0 10px 0")}
+      #{Buttons.action_button(:confirmed, dgettext("emails_booking", "Book Another Time"), booking_url(appointment_details), full_width: true)}
+
+      #{Text.system_footer_note(dgettext("emails_booking", "If you added the meeting to your calendar, the attached file removes it there."))}
+      """
+
+      organizer_details =
+        TemplateHelper.build_organizer_details(appointment_details,
+          intent: @intent,
+          eyebrow: dgettext("emails_booking", "Cancelled"),
+          stage_title: dgettext("emails_booking", "Spot cancelled"),
+          stage_subtitle:
+            dgettext("emails_booking", "with %{name}", name: appointment_details.organizer_name)
+        )
+
+      MjmlEmail.base_email()
+      |> to({appointment_details.attendee_name, attendee_email})
+      |> subject(
+        Sanitise.sanitize_for_header(
+          dgettext("emails_booking", "Spot cancelled - %{date} with %{name}",
+            date: Formatting.format_date_short(appointment_details.date, locale),
+            name: appointment_details.organizer_name
+          )
+        )
+      )
+      |> html_body(TemplateHelper.compile_template(mjml_content, organizer_details))
+      |> text_body(text_body_seat_given_up(appointment_details, locale))
+      |> attachment(cancel_ics_attachment(appointment_details, locale))
+    end)
+  end
+
   def render(:attendee, attendee_email, appointment_details) do
+    appointment_details = Formatting.without_location_note(appointment_details)
+
     locale = Map.get(appointment_details, :attendee_locale, "en")
 
     Gettext.with_locale(TymeslotWeb.Gettext, locale, fn ->
@@ -94,6 +154,8 @@ defmodule Tymeslot.Emails.Templates.AppointmentCancellation do
   end
 
   def render(:guest, guest_email, appointment_details) do
+    appointment_details = Formatting.without_location_note(appointment_details)
+
     # Guests inherit the booker's locale, as their invitation does.
     locale = Map.get(appointment_details, :attendee_locale, "en")
 
@@ -111,7 +173,7 @@ defmodule Tymeslot.Emails.Templates.AppointmentCancellation do
       }
 
       mjml_content = """
-      #{Text.centered_text(dgettext("emails_booking", "Hi %{guest} - the meeting with %{organizer} that %{booker} invited you to has been cancelled.", guest: guest_name, organizer: appointment_details.organizer_name, booker: appointment_details.attendee_name), padding: "8px 0 16px 0")}
+      #{Text.centered_text(guest_intro(appointment_details, guest_name), padding: "8px 0 16px 0")}
 
       #{MeetingComponents.meeting_details_table(meeting_details, locale)}
 
@@ -147,6 +209,8 @@ defmodule Tymeslot.Emails.Templates.AppointmentCancellation do
   end
 
   def render(:organizer, organizer_email, appointment_details) do
+    appointment_details = Formatting.without_location_note(appointment_details)
+
     Gettext.with_locale(TymeslotWeb.Gettext, organizer_locale(appointment_details), fn ->
       refund_notice = RefundNotice.build(appointment_details)
 
@@ -216,6 +280,83 @@ defmodule Tymeslot.Emails.Templates.AppointmentCancellation do
     """
   end
 
+  # A group participant who gave up their own spot: nothing to apologise
+  # for, and no slot freed for booking (the others still hold it). When they
+  # were the last one on it the meeting is off, so it is not said to go ahead.
+  defp seat_given_up_intro(appointment_details, locale) do
+    given_up =
+      dgettext(
+        "emails_booking",
+        "Hi %{name} - you've given up your spot in %{meeting} on %{date}.",
+        name: appointment_details.attendee_name,
+        meeting: appointment_details.meeting_type || appointment_details.title,
+        date: Formatting.format_datetime(appointment_details.start_time_attendee_tz, locale)
+      )
+
+    case goes_ahead_line(appointment_details) do
+      nil -> given_up
+      line -> given_up <> " " <> line
+    end
+  end
+
+  defp goes_ahead_line(%{slot_freed: true}), do: nil
+
+  defp goes_ahead_line(_appointment_details),
+    do: dgettext("emails_booking", "The meeting goes ahead for the others.")
+
+  defp text_body_seat_given_up(appointment_details, locale) do
+    meeting_details = TextBodyHelper.format_meeting_details(appointment_details, locale)
+
+    """
+    #{dgettext("emails_booking", "Spot cancelled")}
+
+    #{seat_given_up_intro(appointment_details, locale)}
+
+    #{dgettext("emails_booking", "CANCELLED SPOT:")}
+    #{dgettext("emails_booking", "Meeting with:")} #{appointment_details.organizer_name}
+    #{meeting_details}
+
+    #{dgettext("emails_booking", "Would you like to book another time?")}
+    #{dgettext("emails_booking", "Visit:")} #{booking_url(appointment_details)}
+    """
+  end
+
+  # Whoever put the guest on the meeting is the one named as inviting them
+  # (see `Tymeslot.Meetings.GuestSchema.inviter/1`).
+  defp guest_intro(%{guest_invited_by: :organizer} = appointment_details, guest_name) do
+    dgettext(
+      "emails_booking",
+      "Hi %{guest} - the meeting %{organizer} invited you to has been cancelled.",
+      guest: guest_name,
+      organizer: appointment_details.organizer_name
+    )
+  end
+
+  defp guest_intro(appointment_details, guest_name) do
+    dgettext(
+      "emails_booking",
+      "Hi %{guest} - the meeting with %{organizer} that %{booker} invited you to has been cancelled.",
+      guest: guest_name,
+      organizer: appointment_details.organizer_name,
+      booker: appointment_details.attendee_name
+    )
+  end
+
+  defp guest_cancelled_line(%{guest_invited_by: :organizer} = appointment_details) do
+    dgettext("emails_booking", "The meeting %{organizer} invited you to has been cancelled.",
+      organizer: appointment_details.organizer_name
+    )
+  end
+
+  defp guest_cancelled_line(appointment_details) do
+    dgettext(
+      "emails_booking",
+      "The meeting with %{organizer} that %{booker} invited you to has been cancelled.",
+      organizer: appointment_details.organizer_name,
+      booker: appointment_details.attendee_name
+    )
+  end
+
   defp text_body_guest(appointment_details, guest_name, locale) do
     meeting_details = TextBodyHelper.format_meeting_details(appointment_details, locale)
 
@@ -224,7 +365,7 @@ defmodule Tymeslot.Emails.Templates.AppointmentCancellation do
 
     #{dgettext("emails_booking", "Hi %{guest},", guest: guest_name)}
 
-    #{dgettext("emails_booking", "The meeting with %{organizer} that %{booker} invited you to has been cancelled.", organizer: appointment_details.organizer_name, booker: appointment_details.attendee_name)}
+    #{guest_cancelled_line(appointment_details)}
 
     #{dgettext("emails_booking", "CANCELLED APPOINTMENT DETAILS:")}
     #{meeting_details}

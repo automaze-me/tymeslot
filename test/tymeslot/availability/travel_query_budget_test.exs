@@ -19,6 +19,7 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
 
   alias Tymeslot.Availability.Calculate
   alias Tymeslot.Availability.Offer
+  alias Tymeslot.Availability.Reach
   alias Tymeslot.Availability.Travel
   alias Tymeslot.Bookings.Policy
   alias TymeslotWeb.Live.Scheduling.CalendarHelpers
@@ -41,7 +42,8 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
       insert(:availability_schedule,
         profile: profile,
         is_default: true,
-        buffer_minutes: 0,
+        buffer_before_minutes: 0,
+        buffer_after_minutes: 0,
         min_advance_hours: 0,
         advance_booking_days: 365
       )
@@ -171,7 +173,8 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
         schedule_id: ctx.schedule.id,
         max_advance_booking_days: 365,
         min_advance_hours: 0,
-        buffer_minutes: 0,
+        buffer_before_minutes: 0,
+        buffer_after_minutes: 0,
         duration_minutes: 30,
         owner_timezone: @home,
         profile_id: ctx.profile.id
@@ -214,17 +217,21 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
       assert count == 1
     end
 
-    test "the slot-list call site asks for a window padded by a day at each end", ctx do
+    # Padded by the owner dates the slot engine reads either side of a date,
+    # the same reach its schedule prefetch uses.
+    test "the slot-list call site asks for a window padded by the engine's reach", ctx do
       [params] =
         trip_queries(ctx.profile.id, fn ->
           {:ok, _slots} =
             Offer.slots_for_date(request(ctx), Date.to_iso8601(ctx.in_trip), 30)
         end)
 
-      assert window(params) == {Date.add(ctx.in_trip, -1), Date.add(ctx.in_trip, 1)}
+      assert window(params) ==
+               {Date.add(ctx.in_trip, -Reach.owner_days()),
+                Date.add(ctx.in_trip, Reach.owner_days())}
     end
 
-    test "the calendar-range call site asks for a window padded by a day at each end", ctx do
+    test "the calendar-range call site asks for a window padded by the engine's reach", ctx do
       last_date = Date.add(ctx.in_trip, 6)
 
       [params] =
@@ -233,7 +240,9 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
             Offer.days_in_range(request(ctx), ctx.in_trip, last_date, 30)
         end)
 
-      assert window(params) == {Date.add(ctx.in_trip, -1), Date.add(last_date, 1)}
+      assert window(params) ==
+               {Date.add(ctx.in_trip, -Reach.owner_days()),
+                Date.add(last_date, Reach.owner_days())}
     end
 
     test "a prefetched list wins, so no second lookup runs", ctx do

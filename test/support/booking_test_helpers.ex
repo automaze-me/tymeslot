@@ -6,6 +6,7 @@ defmodule Tymeslot.BookingTestHelpers do
   import ExUnit.Assertions
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
+  import Tymeslot.Factory
 
   alias Tymeslot.TestHelpers.Eventually
   alias TymeslotWeb.Themes.Shared.LocalizationHelpers
@@ -28,6 +29,45 @@ defmodule Tymeslot.BookingTestHelpers do
   @prev_month "button[phx-click='prev_month']"
   @month_label ".calendar-month-label"
   @next_week "button[phx-click='next_week']"
+
+  @doc """
+  A profile on `theme_id` that `navigate_to_booking_form/3` can book: open
+  09:00 to 17:00 New York time every day, up to 30 days ahead, with no
+  notice or buffer, and an active calendar.
+  """
+  @spec bookable_profile(struct(), String.t(), String.t()) :: struct()
+  def bookable_profile(user, theme_id, username) do
+    profile =
+      insert(:profile,
+        user: user,
+        username: username,
+        booking_theme: theme_id,
+        timezone: "America/New_York"
+      )
+
+    schedule =
+      insert(:availability_schedule,
+        profile: profile,
+        is_default: true,
+        advance_booking_days: 30,
+        min_advance_hours: 0,
+        buffer_before_minutes: 0,
+        buffer_after_minutes: 0
+      )
+
+    Enum.each(1..7, fn day_of_week ->
+      insert(:weekly_availability,
+        schedule: schedule,
+        day_of_week: day_of_week,
+        is_available: true,
+        start_time: ~T[09:00:00],
+        end_time: ~T[17:00:00]
+      )
+    end)
+
+    insert(:calendar_integration, user: user, is_active: true)
+    profile
+  end
 
   @doc """
   Navigates through the complete booking flow from profile page to booking form.
@@ -93,6 +133,19 @@ defmodule Tymeslot.BookingTestHelpers do
     # Navigate to date/time selection
     view |> element(@next_step) |> render_click()
 
+    walk_from_schedule_to_booking_form(view, timezone)
+  end
+
+  @doc """
+  The second half of `walk_to_booking_form/3`: from the schedule step, picks
+  tomorrow's first offered time and moves on to the booking form.
+
+  Public for a page that opens on the schedule step, as `/:username/:slug`
+  does, where there is no overview card to pick.
+  """
+  @spec walk_from_schedule_to_booking_form(Phoenix.LiveViewTest.View.t(), String.t()) ::
+          Phoenix.LiveViewTest.View.t()
+  def walk_from_schedule_to_booking_form(view, timezone) do
     # Wait for availability to load and select an available date
     today = timezone |> DateTime.now!() |> DateTime.to_date()
     target_date = Date.add(today, 1)
@@ -144,9 +197,12 @@ defmodule Tymeslot.BookingTestHelpers do
     |> render_click()
   end
 
-  # Bring `target_date` into the displayed range, driving whichever control the
-  # rendered theme actually offers.
-  defp advance_calendar_to(view, target_date) do
+  @doc """
+  Brings `target_date` into the displayed range, driving whichever control the
+  rendered theme actually offers: Quill's month arrows or Rhythm's week arrows.
+  """
+  @spec advance_calendar_to(Phoenix.LiveViewTest.View.t(), Date.t()) :: :ok
+  def advance_calendar_to(view, target_date) do
     wait_until(fn -> has_element?(view, @calendar_day) end)
 
     cond do
@@ -154,6 +210,8 @@ defmodule Tymeslot.BookingTestHelpers do
       has_element?(view, @next_week) -> advance_week(view, target_date)
       true -> :ok
     end
+
+    :ok
   end
 
   @doc """

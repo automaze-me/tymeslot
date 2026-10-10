@@ -54,6 +54,10 @@ defmodule Tymeslot.Integrations.Calendar.ICalBuilder.Patcher do
     * An `ATTENDEE` whose address is not a `mailto:` URI (a room, a group, a
       `urn:uuid:` principal) cannot be named by the payload's list, which the
       sync builds from `mailto:` addresses only, and is kept.
+    * In `:organiser_attendee` mode the `ATTENDEE` naming the event's
+      `ORGANIZER` is kept whatever the list says, and in Tymeslot's own block
+      is added when missing: that server adds its calendar's owner back
+      under their primary address the moment the line goes (issue #151).
 
   Tymeslot's own block, told apart by the `X-TYMESLOT-ATTENDEES` marker
   `build_simple_event/3` emits beside it or by the absence of any `ATTENDEE`
@@ -68,8 +72,8 @@ defmodule Tymeslot.Integrations.Calendar.ICalBuilder.Patcher do
   alias Tymeslot.Integrations.Calendar.CalDAV.Scheduling
   alias Tymeslot.Integrations.Calendar.ICalBuilder
   alias Tymeslot.Integrations.Calendar.ICalBuilder.Alarms
+  alias Tymeslot.Integrations.Calendar.ICalBuilder.ContentLines
   alias Tymeslot.Integrations.Calendar.ICalBuilder.Format
-  alias Tymeslot.Integrations.Calendar.ICalBuilder.LineFolder
   alias Tymeslot.Integrations.Calendar.ICalBuilder.Properties
 
   @doc """
@@ -85,13 +89,28 @@ defmodule Tymeslot.Integrations.Calendar.ICalBuilder.Patcher do
     patch_set = build_patch_set(event_data, mode)
 
     raw_ical
-    |> LineFolder.unfold_lines()
-    |> Enum.reject(&(&1 == ""))
+    |> ContentLines.split()
     |> patch_components(patch_set)
-    |> Enum.join("\r\n")
-    |> Kernel.<>("\r\n")
-    |> LineFolder.fold_lines()
+    |> ContentLines.join()
   end
+
+  @doc """
+  Applies the property changes `event_data` describes to one `VEVENT`, given
+  as the unfolded content lines between its `BEGIN:VEVENT` and `END:VEVENT`,
+  and returns its new lines. Unlike `patch/3` it patches the event it is
+  given whether or not that is an occurrence override: it is how
+  `ICalBuilder.Series` writes the fields of one occurrence.
+
+  Every key is serialised exactly as `patch/3` serialises it, timing
+  included, so a caller editing an override leaves `:start_time`,
+  `:end_time`, `:recurrence_rule` and `:recurrence_exceptions` out: those are
+  written here as the master of a series writes them, which an override must
+  not be.
+  """
+  @spec patch_vevent([String.t()], map(), Scheduling.mode()) :: [String.t()]
+  def patch_vevent(body, event_data, mode \\ :contact)
+      when is_list(body) and is_map(event_data),
+      do: apply_patch_set(body, build_patch_set(event_data, mode))
 
   # A patch set is the list of {properties it replaces, replacement lines} the
   # payload asks for, plus the reminders decision, computed once for the whole
@@ -146,40 +165,36 @@ defmodule Tymeslot.Integrations.Calendar.ICalBuilder.Patcher do
   defp patch_components([], _patch_set), do: []
 
   defp patch_components(["BEGIN:VEVENT" | rest], patch_set) do
-    {body, remaining} = take_until(rest, "END:VEVENT", [])
+    {body, remaining} = ContentLines.take_until(rest, "END:VEVENT")
 
     ["BEGIN:VEVENT"] ++
-      patch_vevent(body, patch_set) ++
+      patch_master(body, patch_set) ++
       ["END:VEVENT"] ++ patch_components(remaining, patch_set)
   end
 
   defp patch_components([line | rest], patch_set),
     do: [line | patch_components(rest, patch_set)]
 
-  defp take_until([], _terminator, acc), do: {Enum.reverse(acc), []}
-  defp take_until([terminator | rest], terminator, acc), do: {Enum.reverse(acc), rest}
-  defp take_until([line | rest], terminator, acc), do: take_until(rest, terminator, [line | acc])
-
-  defp patch_vevent(body, patch_set) do
-    {properties, alarms} = split_alarms(body, [], [])
-
-    if override?(properties) do
-      body
-    else
-      entries = patch_set.entries ++ attendee_entries(properties, patch_set)
-      replaced = MapSet.new(Enum.flat_map(entries, fn {names, _lines} -> names end))
-
-      kept = Enum.reject(properties, &MapSet.member?(replaced, property_name(&1)))
-      added = Enum.flat_map(entries, fn {_names, lines} -> content_lines(lines) end)
-
-      kept ++ added ++ patched_alarms(alarms, patch_set.event_data)
-    end
-  end
-
   # An occurrence override carries the timing of its own instance; the payload
   # describes the series' master event, so applying it here would move every
   # exception onto the master's start.
-  defp override?(properties), do: Enum.any?(properties, &(property_name(&1) == "RECURRENCE-ID"))
+  defp patch_master(body, patch_set) do
+    if Enum.any?(body, &(ContentLines.property_name(&1) == "RECURRENCE-ID")),
+      do: body,
+      else: apply_patch_set(body, patch_set)
+  end
+
+  defp apply_patch_set(body, patch_set) do
+    {properties, alarms} = split_alarms(body, [], [])
+
+    entries = patch_set.entries ++ attendee_entries(properties, patch_set)
+    replaced = MapSet.new(Enum.flat_map(entries, fn {names, _lines} -> names end))
+
+    kept = Enum.reject(properties, &MapSet.member?(replaced, ContentLines.property_name(&1)))
+    added = Enum.flat_map(entries, fn {_names, lines} -> content_lines(lines) end)
+
+    kept ++ added ++ patched_alarms(alarms, patch_set.event_data)
+  end
 
   # Both spellings are always replaced in a block of Tymeslot's own, never just
   # the one being written, so a document Tymeslot wrote under the other mode,
@@ -206,21 +221,24 @@ defmodule Tymeslot.Integrations.Calendar.ICalBuilder.Patcher do
     do: {@rewritten_attendee_properties, Properties.build_attendee_lines(event_data, :contact)}
 
   defp attendee_entry(properties, attendees, _event_data, mode, ours) do
-    wanted = MapSet.new(attendees, &attendee_address/1)
+    organiser = organiser_address(properties, mode)
+    wanted = MapSet.new([organiser | Enum.map(attendees, &attendee_address/1)])
 
     kept =
       Enum.filter(properties, fn line ->
-        property_name(line) == "ATTENDEE" and keep_attendee_line?(line, wanted)
+        ContentLines.property_name(line) == "ATTENDEE" and keep_attendee_line?(line, wanted)
       end)
 
     present = MapSet.new(kept, &line_address/1)
 
     added =
       attendees
-      |> Enum.reject(&(is_nil(attendee_address(&1)) or attendee_address(&1) in present))
+      |> Enum.reject(
+        &(attendee_address(&1) in [nil, organiser] or attendee_address(&1) in present)
+      )
       |> Enum.uniq_by(&attendee_address/1)
 
-    lines = kept ++ added_lines(added, mode, ours)
+    lines = kept ++ added_lines(added, missing_organiser(organiser, present, ours), mode, ours)
 
     {replaced_attendee_properties(ours), join_lines(lines ++ marker(lines, mode, ours))}
   end
@@ -232,18 +250,42 @@ defmodule Tymeslot.Integrations.Calendar.ICalBuilder.Patcher do
     end
   end
 
+  # Read from the document rather than the payload, which names the organiser
+  # only when it rebuilds the event: `ORGANIZER` is never patched, so the
+  # stored one is the event's.
+  defp organiser_address(properties, :organiser_attendee) do
+    Enum.find_value(properties, fn line ->
+      if ContentLines.property_name(line) == "ORGANIZER", do: line_address(line)
+    end)
+  end
+
+  defp organiser_address(_properties, _mode), do: nil
+
+  # Only Tymeslot's own block gains the organiser's line. An event someone
+  # else organised, synced into the grid, is theirs to describe.
+  defp missing_organiser(nil, _present, _ours), do: nil
+  defp missing_organiser(_organiser, _present, false = _ours), do: nil
+
+  defp missing_organiser(organiser, present, true = _ours),
+    do: if(organiser in present, do: nil, else: organiser)
+
   # See the moduledoc: a `CONTACT` is only ever added where this module owns
   # the `CONTACT` lines, so a later removal can take it away again.
-  defp added_lines(_added, :contact, false = _ours), do: []
+  defp added_lines(_added, _organiser, :contact, false = _ours), do: []
 
-  defp added_lines(added, mode, _ours),
-    do: content_lines(Properties.build_attendee_lines(%{attendees: added}, mode))
+  defp added_lines(added, organiser, mode, _ours) do
+    %{attendees: added, organizer_email: organiser}
+    |> Properties.build_attendee_lines(mode)
+    |> content_lines()
+  end
 
   defp replaced_attendee_properties(true = _ours), do: @rewritten_attendee_properties
   defp replaced_attendee_properties(false = _ours), do: ["ATTENDEE"]
 
-  defp marker(lines, :attendee, true = _ours) do
-    if Enum.any?(lines, &(property_name(&1) == "ATTENDEE")),
+  defp marker(_lines, :contact, _ours), do: []
+
+  defp marker(lines, _mode, true = _ours) do
+    if Enum.any?(lines, &(ContentLines.property_name(&1) == "ATTENDEE")),
       do: [ICalBuilder.attendee_marker()],
       else: []
   end
@@ -275,10 +317,10 @@ defmodule Tymeslot.Integrations.Calendar.ICalBuilder.Patcher do
   end
 
   defp advertises_attendees?(properties),
-    do: Enum.any?(properties, &(property_name(&1) == "ATTENDEE"))
+    do: Enum.any?(properties, &(ContentLines.property_name(&1) == "ATTENDEE"))
 
   defp marked_ours?(properties),
-    do: Enum.any?(properties, &(property_name(&1) == "X-TYMESLOT-ATTENDEES"))
+    do: Enum.any?(properties, &(ContentLines.property_name(&1) == "X-TYMESLOT-ATTENDEES"))
 
   defp patched_alarms(alarms, event_data) do
     if Map.has_key?(event_data, :reminders) do
@@ -295,7 +337,7 @@ defmodule Tymeslot.Integrations.Calendar.ICalBuilder.Patcher do
     do: {Enum.reverse(properties), Enum.reverse(alarms)}
 
   defp split_alarms(["BEGIN:VALARM" | rest], properties, alarms) do
-    {body, remaining} = take_until(rest, "END:VALARM", [])
+    {body, remaining} = ContentLines.take_until(rest, "END:VALARM")
     alarm = ["BEGIN:VALARM"] ++ body ++ ["END:VALARM"]
     split_alarms(remaining, properties, [alarm | alarms])
   end
@@ -308,13 +350,4 @@ defmodule Tymeslot.Integrations.Calendar.ICalBuilder.Patcher do
   # normalised to a list of content lines here.
   defp content_lines(nil), do: []
   defp content_lines(lines), do: String.split(lines, ~r/\r\n|\r|\n/, trim: true)
-
-  # RFC 5545 §3.1: the property name runs to the first parameter separator or
-  # the value separator, whichever comes first.
-  defp property_name(line) do
-    line
-    |> String.split([";", ":"], parts: 2)
-    |> hd()
-    |> String.upcase()
-  end
 end

@@ -12,6 +12,7 @@ defmodule TymeslotWeb.Dashboard.Automation.SlackEventHandlersTest do
   import Tymeslot.Factory
 
   alias Tymeslot.ConfigTestHelpers
+  alias Tymeslot.Infrastructure.CorrelationId
   alias Tymeslot.Onboarding.OnboardingQueries
   alias Tymeslot.Security.Encryption
   alias Tymeslot.Slack
@@ -149,7 +150,7 @@ defmodule TymeslotWeb.Dashboard.Automation.SlackEventHandlersTest do
       view |> element("button", "Add Slack via Webhook URL") |> render_click()
       assert render(view) =~ "Slack Webhook URL"
 
-      view |> element("button", "Close") |> render_click()
+      view |> element("button[aria-label='Close']") |> render_click()
       assert render(view) =~ "No Slack Integrations"
     end
   end
@@ -223,7 +224,7 @@ defmodule TymeslotWeb.Dashboard.Automation.SlackEventHandlersTest do
       open_slack_tab(view)
 
       view |> element("button[title='Delete']") |> render_click()
-      assert render(view) =~ "Delete Slack Integration?"
+      assert render(view) =~ "Delete Slack integration"
 
       view |> element("#delete-slack-modal button", "Delete Integration") |> render_click()
 
@@ -384,6 +385,41 @@ defmodule TymeslotWeb.Dashboard.Automation.SlackEventHandlersTest do
       refreshed_html = render_async(view)
       assert refreshed_html =~ "#bookings"
       assert refreshed_html =~ "#new-channel"
+    end
+  end
+
+  describe "channel loading in start_async" do
+    test "runs with the LiveView's correlation id", %{conn: conn, user: user} do
+      ConfigTestHelpers.setup_config(:tymeslot,
+        slack_oauth_available: true,
+        slack_client_id: "test-client-id"
+      )
+
+      pending =
+        insert(:slack_integration,
+          user: user,
+          app_mode: "oauth",
+          channel_id: nil,
+          channel_name: nil
+        )
+
+      test_pid = self()
+
+      expect(Tymeslot.HTTPClientMock, :get, fn _url, _headers, _opts ->
+        send(test_pid, {:fetch_correlation_id, Logger.metadata()[:correlation_id]})
+        {:error, %Mint.TransportError{reason: :timeout}}
+      end)
+
+      {:ok, view, _html} = live(conn, "/dashboard/automation?slack_pending=#{pending.id}")
+      render_async(view)
+
+      assert_received {:fetch_correlation_id, correlation_id}
+
+      {:dictionary, dictionary} = Process.info(view.pid, :dictionary)
+      live_view_metadata = Map.new(dictionary)[:"$logger_metadata$"] || %{}
+
+      assert CorrelationId.valid?(correlation_id)
+      assert correlation_id == live_view_metadata[:correlation_id]
     end
   end
 

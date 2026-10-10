@@ -137,8 +137,44 @@ defmodule Tymeslot.Infrastructure.Logging.FileSinkTest do
     test "returns {:error, _} and leaves handler uninstalled when the cloudron default path directory cannot be created" do
       System.put_env("DEPLOYMENT_TYPE", "cloudron")
       System.delete_env("LOG_FILE_PATH")
+      # The real default, /app/data/logs, can be created on a machine whose
+      # /app/data is writable, so point the default somewhere that never is.
+      Application.put_env(:tymeslot, :cloudron_log_file_path, "/proc/impossible/app.log")
+      on_exit(fn -> Application.delete_env(:tymeslot, :cloudron_log_file_path) end)
 
       assert {:error, _reason} = FileSink.attach()
+      assert {:error, {:not_found, _id}} = :logger.get_handler_config(FileSink.handler_id())
+    end
+
+    test "treats the legacy DEPLOYMENT_TYPE=main as cloudron and targets the cloudron default path" do
+      # `main` is the legacy spelling of `cloudron` that config/runtime.exs
+      # still accepts; an instance on it must get the same persistent log file.
+      # The cloudron default is pointed at a temporary path, so the handler's
+      # file proves the sink resolved that default rather than staying disabled.
+      tmp =
+        Path.join(System.tmp_dir!(), "tymeslot_file_sink_#{System.unique_integer([:positive])}")
+
+      log_path = Path.join(tmp, "app.log")
+      System.put_env("DEPLOYMENT_TYPE", "main")
+      System.delete_env("LOG_FILE_PATH")
+      Application.put_env(:tymeslot, :cloudron_log_file_path, log_path)
+
+      on_exit(fn ->
+        Application.delete_env(:tymeslot, :cloudron_log_file_path)
+        File.rm_rf!(tmp)
+      end)
+
+      assert :ok = FileSink.attach()
+
+      assert {:ok, %{config: cfg}} = :logger.get_handler_config(FileSink.handler_id())
+      assert cfg.file == String.to_charlist(log_path)
+    end
+
+    test "stays disabled for any other DEPLOYMENT_TYPE without LOG_FILE_PATH" do
+      System.put_env("DEPLOYMENT_TYPE", "railway")
+      System.delete_env("LOG_FILE_PATH")
+
+      assert :ok = FileSink.attach()
       assert {:error, {:not_found, _id}} = :logger.get_handler_config(FileSink.handler_id())
     end
 

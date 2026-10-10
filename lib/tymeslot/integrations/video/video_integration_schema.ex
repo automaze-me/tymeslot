@@ -6,9 +6,14 @@ defmodule Tymeslot.Integrations.Video.VideoIntegrationSchema do
   use Gettext, backend: TymeslotWeb.Gettext
   import Ecto.Changeset
   alias Tymeslot.ChangesetValidators.URL, as: URLValidator
+  alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Integrations.Video.ProviderConfig
+  alias Tymeslot.Security.EncryptedString
   alias Tymeslot.Security.Encryption
+  alias Tymeslot.Security.LegacyPlainColumn
   alias Tymeslot.Security.SsrfGuard
+
+  require Logger
 
   # Why a provider refuses to create rooms for an integration, where its answer
   # says so. `Tymeslot.Integrations.Video.RoomCreationError` describes each one.
@@ -69,7 +74,21 @@ defmodule Tymeslot.Integrations.Video.VideoIntegrationSchema do
     field(:client_secret_encrypted, :binary)
     field(:tenant_id_encrypted, :binary)
     field(:teams_user_id_encrypted, :binary)
-    field(:custom_meeting_url, :string)
+    # A personal meeting room link often carries its passcode (`?pwd=`), so it
+    # is encrypted at rest. The plain `custom_meeting_url` column predates
+    # this and is no longer read; it is only emptied when the link changes
+    # (see `Tymeslot.Security.LegacyPlainColumn`).
+    field(:custom_meeting_url, EncryptedString,
+      source: :custom_meeting_url_encrypted,
+      redact: true
+    )
+
+    field(:legacy_custom_meeting_url, :string,
+      source: :custom_meeting_url,
+      load_in_query: false,
+      redact: true
+    )
+
     field(:token_expires_at, :utc_datetime)
     field(:oauth_scope, :string)
     field(:provider_account_id, :string)
@@ -168,6 +187,7 @@ defmodule Tymeslot.Integrations.Video.VideoIntegrationSchema do
     |> validate_provider_specific_fields()
     |> clear_deleted_at_on_reactivation()
     |> encrypt_credentials()
+    |> LegacyPlainColumn.clear_on_change(custom_meeting_url: :legacy_custom_meeting_url)
     |> foreign_key_constraint(:user_id)
     |> apply_active_uniqueness_constraints()
   end
@@ -251,12 +271,21 @@ defmodule Tymeslot.Integrations.Video.VideoIntegrationSchema do
   defp safe_decrypt(encrypted, field, id) do
     Encryption.decrypt(encrypted)
   rescue
-    _e ->
-      require Logger
-
+    # Data this application encrypted no longer decrypts: corrupted, or the
+    # key it was written under is gone. The field reads as unset.
+    #
+    # Logged, not reported to error tracking: this runs per field for every
+    # row a listing decrypts, so after a lost key each dashboard load would
+    # insert up to eight errors per integration. The condition is recorded
+    # once per integration where it is acted on, by
+    # `ReauthHandling.flag/2` when the integration is flagged for reauth.
+    # Only the exception's module is logged, never its message, so no
+    # ciphertext or key material reaches the log.
+    e ->
       Logger.error("Failed to decrypt video integration field",
         field: field,
-        integration_id: id
+        integration_id: id,
+        error: LogFormat.reason(e.__struct__)
       )
 
       nil

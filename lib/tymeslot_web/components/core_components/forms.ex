@@ -15,6 +15,7 @@ defmodule TymeslotWeb.Components.CoreComponents.Forms do
   use Gettext, backend: TymeslotWeb.Gettext
 
   alias Tymeslot.Security.FieldValidators.PasswordValidator
+  alias Tymeslot.Security.Honeypot
 
   # ========== UNIFIED INPUT ==========
 
@@ -105,6 +106,7 @@ defmodule TymeslotWeb.Components.CoreComponents.Forms do
         |> error_aria(error_id)
         |> Map.merge(html_constraints(assigns))
         |> disabled_attr(assigns.disabled)
+        |> required_attr(assigns.required)
         |> Map.merge(assigns.rest)
       )
 
@@ -143,7 +145,6 @@ defmodule TymeslotWeb.Components.CoreComponents.Forms do
           value={@value}
           checked={@checked}
           placeholder={@placeholder}
-          required={@required}
           errors={@errors}
           has_leading_icon={@icon || render_slot(@leading_icon)}
           has_trailing_icon={render_slot(@trailing_icon)}
@@ -251,7 +252,7 @@ defmodule TymeslotWeb.Components.CoreComponents.Forms do
             Phoenix.HTML.Form.normalize_value("checkbox", @checked_value)
         end
       }
-      class="checkbox w-5 h-5 rounded border-tymeslot-300 text-turquoise-600 focus:ring-turquoise-500"
+      class="checkbox w-5 h-5"
       {@rest}
     />
     """
@@ -292,6 +293,14 @@ defmodule TymeslotWeb.Components.CoreComponents.Forms do
   defp disabled_attr(rest, true), do: Map.put(rest, :disabled, true)
   defp disabled_attr(rest, _disabled), do: rest
 
+  # `required` is declared for the label's `*`, so it needs the same threading
+  # as `disabled`. Rendering it switches on native browser validation: a form
+  # that shows its own server-side errors for empty fields must carry
+  # `novalidate`, which keeps the attribute for assistive technology while
+  # leaving the error messages to the app.
+  defp required_attr(rest, true), do: Map.put(rest, :required, true)
+  defp required_attr(rest, _required), do: rest
+
   defp html_constraints(assigns) do
     Map.reject(
       Map.new(@html_constraints, &{&1, assigns[&1]}),
@@ -310,7 +319,7 @@ defmodule TymeslotWeb.Components.CoreComponents.Forms do
   @spec label(map()) :: Phoenix.LiveView.Rendered.t()
   def label(assigns) do
     ~H"""
-    <label for={@for} class="label mb-2 block">
+    <label for={@for} class="label">
       {render_slot(@inner_block)}
     </label>
     """
@@ -445,4 +454,36 @@ defmodule TymeslotWeb.Components.CoreComponents.Forms do
     </.form>
     """
   end
+
+  # ========== HONEYPOT ==========
+
+  @doc """
+  Renders the honeypot field `Tymeslot.Security.Honeypot` checks.
+
+  Hidden from sighted users by `sr-only`, from assistive technology by
+  `aria-hidden`, from keyboard users by `tabindex="-1"`, and from autofill by
+  `autocomplete="off"`. Bots that fill every field fill this one too. `sr-only`
+  is a Tailwind utility, so the field stays hidden under every stylesheet that
+  scans Core's web layer: the dashboard's, each booking theme's and SaaS's.
+
+  `param_root` nests the input under the form's params (`booking[website]`);
+  leave it out for a form that posts flat params.
+  """
+  attr :id, :string, required: true
+  attr :param_root, :string, default: nil
+
+  @spec honeypot_field(map()) :: Phoenix.LiveView.Rendered.t()
+  def honeypot_field(assigns) do
+    assigns = assign(assigns, :name, honeypot_name(assigns.param_root))
+
+    ~H"""
+    <div class="sr-only" aria-hidden="true">
+      <label for={@id}>Website</label>
+      <input id={@id} type="text" name={@name} tabindex="-1" autocomplete="off" value="" />
+    </div>
+    """
+  end
+
+  defp honeypot_name(nil), do: Honeypot.field()
+  defp honeypot_name(param_root), do: "#{param_root}[#{Honeypot.field()}]"
 end
