@@ -135,7 +135,9 @@ A new resolver, `BookingPages.resolve(segment)`, returns
 that username and `page: nil`, else the profile owning the page with that
 address and the page, else `:error`.
 
-It replaces the plain username lookup at the public entry points:
+It is reached through the lookup the public entry points already share,
+`Profiles.get_profile_by_username/1`, which falls back to it when no username
+matches, and through `Profiles.resolve_organizer_context/1`. That covers:
 
 - `Profiles.resolve_organizer_context/1` (reached through `Demo` and
   `OrganizerHelpers.handle_username_resolution/2` from `Themes.Core.Dispatcher`
@@ -300,10 +302,10 @@ Changed (narrow hooks):
   has to make room there (for example by moving the attribution fields into a
   helper) rather than add to it.
 - `lib/tymeslot/emails/appointment_builder.ex`: page-aware booking URL.
-- `lib/tymeslot_web/hooks/theme_hook.ex`, `embed_auth_hook.ex`,
-  `page_view_hook.ex`, `plugs/security_headers_plug.ex`,
-  `controllers/meeting_calendar_controller.ex`,
-  `themes/core/context.ex`: resolver and page-aware theme.
+- `lib/tymeslot_web/themes/core/context.ex`,
+  `themes/shared/customization/helpers.ex`: a page's colours. The theme hook,
+  embed check, security headers, page views and `.ics` download need no
+  change: they all resolve through `Profiles.get_profile_by_username/1`.
 - `lib/tymeslot_web/themes/shared/booking_text.ex`: read a page or a profile.
 - `lib/tymeslot_web/live/dashboard/theme_settings_component.ex`,
   `theme_settings/booking_text_form.ex`,
