@@ -87,6 +87,17 @@ defmodule Tymeslot.BookingPages do
   def page_id(%{booking_page: %BookingPageSchema{id: id}}), do: id
   def page_id(_profile), do: nil
 
+  @doc """
+  `id` when that page still exists, otherwise nil. A booking keeps the page it
+  came through only while there is one: a page deleted while its visitor was
+  on the booking form must not make the booking fail.
+  """
+  @spec existing_id(integer() | nil) :: integer() | nil
+  def existing_id(id) when is_integer(id),
+    do: if(BookingPageQueries.exists?(id), do: id, else: nil)
+
+  def existing_id(_none), do: nil
+
   @doc "A profile's pages, oldest first."
   @spec list(integer()) :: [page()]
   def list(profile_id), do: BookingPageQueries.list_for_profile(profile_id)
