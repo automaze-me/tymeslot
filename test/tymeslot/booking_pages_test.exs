@@ -81,6 +81,25 @@ defmodule Tymeslot.BookingPagesTest do
 
       assert {:error, :not_found} = BookingPages.update_details(page, %{"name" => "New"})
     end
+
+    # An emptied field casts to nil, which the trimming must let through to
+    # the required check.
+    test "an emptied name or address can't be blank, in the form and on save", %{
+      profile: profile
+    } do
+      page = insert(:booking_page, profile: profile, slug: "einfachiso", name: "Old")
+
+      for {field, attrs} <- [
+            name: %{"name" => "", "slug" => "einfachiso"},
+            slug: %{"name" => "Old", "slug" => " "}
+          ] do
+        assert {"can't be blank", _opts} = BookingPages.change_details(page, attrs).errors[field]
+        assert {:error, changeset} = BookingPages.update_details(page, attrs)
+        assert {"can't be blank", _opts} = changeset.errors[field]
+      end
+
+      assert %{name: "Old", slug: "einfachiso"} = Repo.reload!(page)
+    end
   end
 
   test "update_theme/2 changes only the page", %{profile: profile} do

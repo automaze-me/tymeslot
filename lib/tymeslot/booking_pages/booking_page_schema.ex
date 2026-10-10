@@ -78,7 +78,7 @@ defmodule Tymeslot.BookingPages.BookingPageSchema do
   def details_changeset(page_or_changeset, attrs) do
     page_or_changeset
     |> cast(attrs, [:name, :slug])
-    |> update_change(:name, &String.trim/1)
+    |> update_change(:name, &trim/1)
     |> update_change(:slug, &normalize_slug/1)
     |> validate_required([:name, :slug])
     |> validate_length(:name, max: @name_max_length)
@@ -97,7 +97,12 @@ defmodule Tymeslot.BookingPages.BookingPageSchema do
     |> validate_theme()
   end
 
-  defp normalize_slug(slug), do: slug |> String.trim() |> String.downcase()
+  # An emptied field casts to nil, which `validate_required/2` reports.
+  defp trim(value) when is_binary(value), do: String.trim(value)
+  defp trim(value), do: value
+
+  defp normalize_slug(slug) when is_binary(slug), do: slug |> String.trim() |> String.downcase()
+  defp normalize_slug(slug), do: slug
 
   defp validate_slug(changeset) do
     validate_change(changeset, :slug, fn :slug, slug ->

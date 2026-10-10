@@ -206,6 +206,19 @@ defmodule TymeslotWeb.Dashboard.BookingPagesManageTest do
     assert has_element?(view, "#page-settings-#{page.id}-details input[value='einfachISO']")
   end
 
+  test "emptying the page name says it can't be blank instead of crashing", ctx do
+    page = insert(:booking_page, profile: ctx.profile, slug: "einfachiso", name: "Old")
+    {:ok, view, _html} = live(ctx.conn, ~p"/dashboard/theme?#{[page: page.id]}")
+    details = "#page-settings-#{page.id}-details"
+
+    view |> form(details, page: %{name: "", slug: "einfachiso"}) |> render_change()
+    assert has_element?(view, details, "can't be blank")
+
+    view |> form(details, page: %{name: "", slug: "einfachiso"}) |> render_submit()
+    assert has_element?(view, details, "can't be blank")
+    assert Repo.reload!(page).name == "Old"
+  end
+
   test "saving a page deleted in another tab says so and shows the profile's tab", ctx do
     page = insert(:booking_page, profile: ctx.profile, slug: "einfachiso", name: "Old")
     {:ok, view, _html} = live(ctx.conn, ~p"/dashboard/theme?#{[page: page.id]}")
