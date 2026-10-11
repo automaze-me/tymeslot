@@ -7,6 +7,7 @@ defmodule Tymeslot.BookingPages.BookingPageQueries do
   alias Tymeslot.BookingPages.BookingPageMeetingTypeSchema
   alias Tymeslot.BookingPages.BookingPageSchema
   alias Tymeslot.MeetingTypes.MeetingTypeSchema
+  alias Tymeslot.Profiles.ProfileSchema
   alias Tymeslot.Repo
 
   @doc "A profile's pages, oldest first."
@@ -67,24 +68,45 @@ defmodule Tymeslot.BookingPages.BookingPageQueries do
   def exists?(id), do: Repo.exists?(from(p in BookingPageSchema, where: p.id == ^id))
 
   @doc """
-  Lists a meeting type on a page; listing it again is a no-op. A page or type
-  deleted meanwhile is an error, not a crash.
+  Lists a meeting type on a page; listing it again is a no-op. The row is
+  inserted only if the type belongs to the user who owns the page's profile,
+  so a type id from another account, a missing type, or a page deleted
+  meanwhile is `{:error, :not_found}` and inserts nothing.
   """
-  @spec add_meeting_type(integer(), integer()) :: :ok | {:error, Ecto.Changeset.t()}
+  @spec add_meeting_type(integer(), integer()) :: :ok | {:error, :not_found}
   def add_meeting_type(page_id, meeting_type_id) do
-    changeset =
-      BookingPageMeetingTypeSchema.changeset(%BookingPageMeetingTypeSchema{}, %{
-        booking_page_id: page_id,
-        meeting_type_id: meeting_type_id
-      })
+    now = DateTime.utc_now(:second)
 
-    case Repo.insert(changeset,
-           on_conflict: :nothing,
-           conflict_target: [:booking_page_id, :meeting_type_id]
-         ) do
-      {:ok, _link} -> :ok
-      {:error, _changeset} = error -> error
-    end
+    owned =
+      from(p in BookingPageSchema,
+        join: pr in ProfileSchema,
+        on: pr.id == p.profile_id,
+        join: mt in MeetingTypeSchema,
+        on: mt.user_id == pr.user_id,
+        where: p.id == ^page_id and mt.id == ^meeting_type_id,
+        select: %{
+          booking_page_id: p.id,
+          meeting_type_id: mt.id,
+          inserted_at: type(^now, :utc_datetime),
+          updated_at: type(^now, :utc_datetime)
+        }
+      )
+
+    {inserted, _rows} =
+      Repo.insert_all(BookingPageMeetingTypeSchema, owned,
+        on_conflict: :nothing,
+        conflict_target: [:booking_page_id, :meeting_type_id]
+      )
+
+    if inserted == 1 or listed?(page_id, meeting_type_id), do: :ok, else: {:error, :not_found}
+  end
+
+  defp listed?(page_id, meeting_type_id) do
+    Repo.exists?(
+      from(l in BookingPageMeetingTypeSchema,
+        where: l.booking_page_id == ^page_id and l.meeting_type_id == ^meeting_type_id
+      )
+    )
   end
 
   @doc "Takes a meeting type off a page; one not listed is a no-op."

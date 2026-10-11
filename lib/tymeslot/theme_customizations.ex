@@ -44,8 +44,8 @@ defmodule Tymeslot.ThemeCustomizations do
   Gets a theme customization by scope (see `t:scope/0`) and theme ID.
   """
   @spec get_by_profile_and_theme(scope(), theme_id()) :: ThemeCustomizationSchema.t() | nil
-  def get_by_profile_and_theme({_profile_id, page_id}, theme_id),
-    do: ThemeCustomizationQueries.get_by_page_and_theme(page_id, theme_id)
+  def get_by_profile_and_theme({profile_id, page_id}, theme_id),
+    do: ThemeCustomizationQueries.get_by_page_and_theme(profile_id, page_id, theme_id)
 
   def get_by_profile_and_theme(profile_id, theme_id),
     do: ThemeCustomizationQueries.get_by_profile_and_theme(profile_id, theme_id)

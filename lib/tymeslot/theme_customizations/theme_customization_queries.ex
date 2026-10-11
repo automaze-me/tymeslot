@@ -25,11 +25,17 @@ defmodule Tymeslot.ThemeCustomizations.ThemeCustomizationQueries do
   end
 
   @doc """
-  Gets a booking page's customization for a theme.
+  Gets a booking page's customization for a theme. The profile id must be the
+  one the row belongs to, so another profile's id misses.
   """
-  @spec get_by_page_and_theme(integer(), String.t()) :: ThemeCustomizationSchema.t() | nil
-  def get_by_page_and_theme(page_id, theme_id) do
-    Repo.get_by(ThemeCustomizationSchema, booking_page_id: page_id, theme_id: theme_id)
+  @spec get_by_page_and_theme(integer(), integer(), String.t()) ::
+          ThemeCustomizationSchema.t() | nil
+  def get_by_page_and_theme(profile_id, page_id, theme_id) do
+    Repo.get_by(ThemeCustomizationSchema,
+      profile_id: profile_id,
+      booking_page_id: page_id,
+      theme_id: theme_id
+    )
   end
 
   @doc """

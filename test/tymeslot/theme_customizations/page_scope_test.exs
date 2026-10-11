@@ -33,6 +33,22 @@ defmodule Tymeslot.ThemeCustomizations.PageScopeTest do
              ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, ctx.page.id}, "1")
   end
 
+  test "a page's colours are found only through the profile that owns the page", ctx do
+    insert(:theme_customization,
+      profile: ctx.profile,
+      booking_page: ctx.page,
+      theme_id: "1",
+      color_scheme: "rose"
+    )
+
+    other = insert(:profile)
+
+    assert %{color_scheme: "rose"} =
+             ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, ctx.page.id}, "1")
+
+    assert ThemeCustomizations.get_by_profile_and_theme({other.id, ctx.page.id}, "1") == nil
+  end
+
   test "an upsert in page scope writes the page's row and leaves the profile's alone", ctx do
     insert(:theme_customization, profile: ctx.profile, theme_id: "1", color_scheme: "ocean")
 

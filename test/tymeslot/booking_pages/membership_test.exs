@@ -7,6 +7,8 @@ defmodule Tymeslot.BookingPages.MembershipTest do
   import Tymeslot.Factory
 
   alias Tymeslot.BookingPages
+  alias Tymeslot.BookingPages.BookingPageMeetingTypeSchema
+  alias Tymeslot.Repo
 
   setup do
     user = insert(:user)
@@ -57,10 +59,38 @@ defmodule Tymeslot.BookingPages.MembershipTest do
     foreign = insert(:meeting_type, user: stranger, name: "Foreign")
     own = insert(:meeting_type, user: ctx.user, name: "Own")
 
-    :ok = BookingPages.set_meeting_type(ctx.page, foreign.id, true)
+    Repo.insert!(%BookingPageMeetingTypeSchema{
+      booking_page_id: ctx.page.id,
+      meeting_type_id: foreign.id
+    })
+
     :ok = BookingPages.set_meeting_type(ctx.page, own.id, true)
 
     assert ctx.page |> BookingPages.list_meeting_types() |> Enum.map(& &1.name) == ["Own"]
+  end
+
+  test "refuses to list another account's type and leaves no row", ctx do
+    foreign = insert(:meeting_type, user: insert(:user))
+
+    assert {:error, :not_found} = BookingPages.set_meeting_type(ctx.page, foreign.id, true)
+    assert Repo.all(BookingPageMeetingTypeSchema) == []
+  end
+
+  test "refuses to list a type that does not exist", ctx do
+    assert {:error, :not_found} = BookingPages.set_meeting_type(ctx.page, 0, true)
+    assert Repo.all(BookingPageMeetingTypeSchema) == []
+  end
+
+  test "taking a type off one page leaves the same type on another", ctx do
+    other_page = insert(:booking_page, profile: ctx.profile)
+    type = insert(:meeting_type, user: ctx.user)
+
+    :ok = BookingPages.set_meeting_type(ctx.page, type.id, true)
+    :ok = BookingPages.set_meeting_type(other_page, type.id, true)
+    :ok = BookingPages.set_meeting_type(ctx.page, type.id, false)
+
+    assert BookingPages.list_meeting_types(ctx.page) == []
+    assert [_one] = BookingPages.list_meeting_types(other_page)
   end
 
   test "memberships maps each type to its pages", ctx do
