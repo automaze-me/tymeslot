@@ -44,6 +44,7 @@ defmodule Tymeslot.Bookings.Reschedule do
   alias Tymeslot.Meetings
   alias Tymeslot.Meetings.Approval
   alias Tymeslot.Meetings.MeetingQueries
+  alias Tymeslot.Meetings.MeetingSchema
   alias Tymeslot.Meetings.Scheduling
   alias Tymeslot.Meetings.VideoRooms
   alias Tymeslot.MeetingTypes
@@ -138,6 +139,45 @@ defmodule Tymeslot.Bookings.Reschedule do
     end
   end
 
+  @doc """
+  Moves a booking to the time its calendar event now has, after the host
+  moved the event in their own calendar.
+
+  Everything a reschedule sets off afterwards runs unchanged (availability,
+  video room, reminders, the emails to attendee, organiser and guests, and
+  the webhook, Telegram and Slack dispatches). What it leaves out is what
+  only matters when Tymeslot chooses the time: the policy, availability and
+  calendar checks, the conflict check on the write, the approval gate and
+  the location. The host picked this time in their calendar, so Tymeslot
+  must not second-guess it, and the calendar already holds it, so no
+  calendar job is scheduled; a write-back would only echo the event onto
+  itself.
+
+  The duration follows the event's length. The caller guarantees the meeting
+  is eligible; this checks nothing.
+  """
+  @spec follow_calendar(MeetingSchema.t(), DateTime.t(), DateTime.t()) ::
+          {:ok, MeetingSchema.t()} | {:error, :failed_to_update_meeting}
+  def follow_calendar(
+        %MeetingSchema{} = meeting,
+        %DateTime{} = start_time,
+        %DateTime{} = end_time
+      ) do
+    attrs =
+      meeting
+      |> time_change_attrs(start_time, end_time)
+      |> Map.put(:duration, DateTime.diff(end_time, start_time, :minute))
+
+    case MeetingQueries.update_meeting(meeting, attrs) do
+      {:ok, updated} ->
+        after_commit(updated, meeting)
+        {:ok, updated}
+
+      {:error, _reason} ->
+        {:error, :failed_to_update_meeting}
+    end
+  end
+
   # Private functions
 
   # Everything a committed reschedule sets off outside the meeting row: fresh
@@ -148,6 +188,27 @@ defmodule Tymeslot.Bookings.Reschedule do
     RescheduleLocation.release_abandoned_room(updated_meeting, original_meeting)
     sync_provider_video_room(updated_meeting)
     announce(updated_meeting, original_meeting)
+  end
+
+  # What moving a meeting to a new time changes on its row, whichever path
+  # moves it: the times, the settled reschedule request, the reminder
+  # tracking, the calendar revision, the external-change flag and the join
+  # links that expire relative to the meeting time. The comments in
+  # `apply_time_update_and_schedule_job/4` explain each.
+  defp time_change_attrs(meeting, start_dt, end_dt) do
+    Map.merge(
+      %{
+        start_time: start_dt,
+        end_time: end_dt,
+        reschedule_requested_at: nil,
+        reminders_sent: [],
+        reminder_email_sent: false,
+        ical_sequence: meeting.ical_sequence + 1,
+        calendar_sync_status: nil,
+        calendar_sync_status_dismissed_at: nil
+      },
+      VideoRooms.refreshed_join_url_attrs(meeting, start_dt)
+    )
   end
 
   defp apply_time_update_and_schedule_job(
@@ -195,18 +256,9 @@ defmodule Tymeslot.Bookings.Reschedule do
     # An external-change flag, and the host's dismissal of it, described the
     # old time, so the new time starts without either.
     attrs =
-      %{
-        start_time: start_dt,
-        end_time: end_dt,
-        reschedule_requested_at: nil,
-        reminders_sent: [],
-        reminder_email_sent: false,
-        ical_sequence: meeting.ical_sequence + 1,
-        calendar_sync_status: nil,
-        calendar_sync_status_dismissed_at: nil
-      }
+      meeting
+      |> time_change_attrs(start_dt, end_dt)
       |> Map.merge(gate_attributes(meeting_type, start_dt, meeting))
-      |> Map.merge(VideoRooms.refreshed_join_url_attrs(meeting, start_dt))
       |> Map.merge(location_attrs)
 
     case Repo.transaction(fn ->
