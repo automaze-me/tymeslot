@@ -45,7 +45,7 @@ defmodule Tymeslot.Profiles.OrganizerContext do
   defp load_meeting_types(profile), do: MeetingTypes.get_public_meeting_types(profile.user_id)
 
   defp build_organizer_context(profile, username) do
-    meeting_types = meeting_types_for_profile(profile)
+    meeting_types = profile.meeting_types
     display_name = profile.full_name || get_user_name_from_profile(profile) || username
 
     %{
@@ -59,17 +59,4 @@ defmodule Tymeslot.Profiles.OrganizerContext do
 
   defp get_user_name_from_profile(%{user: %{name: name}}), do: name
   defp get_user_name_from_profile(_arg), do: nil
-
-  # A booking page lists exactly its own types; an empty list is its empty
-  # state, never a reason to show the profile's.
-  defp meeting_types_for_profile(%{booking_page: %BookingPageSchema{}, meeting_types: types}),
-    do: types
-
-  defp meeting_types_for_profile(%{meeting_types: meeting_types, user_id: user_id}) do
-    if meeting_types != [] do
-      meeting_types
-    else
-      if user_id, do: MeetingTypes.get_public_meeting_types(user_id), else: []
-    end
-  end
 end

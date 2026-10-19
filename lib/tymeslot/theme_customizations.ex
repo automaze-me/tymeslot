@@ -11,6 +11,7 @@ defmodule Tymeslot.ThemeCustomizations do
   alias Ecto.Changeset
   alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Profiles.ProfileSchema
+  alias Tymeslot.Repo
   alias Tymeslot.ThemeCustomizations.OptionGroup
   alias Tymeslot.ThemeCustomizations.Options.Background
   alias Tymeslot.ThemeCustomizations.Options.ColourMode
@@ -42,7 +43,8 @@ defmodule Tymeslot.ThemeCustomizations do
   @type user_id :: pos_integer()
   @type customization_input :: ThemeCustomizationSchema.t() | map() | nil
   @type upload_attrs :: %{path: String.t(), filename: String.t()}
-  @type persistence_result :: {:ok, ThemeCustomizationSchema.t()} | {:error, Changeset.t()}
+  @type persistence_result ::
+          {:ok, ThemeCustomizationSchema.t()} | {:error, Changeset.t() | :not_found}
 
   @doc """
   Gets a theme customization by scope (see `t:scope/0`) and theme ID.
@@ -159,74 +161,144 @@ defmodule Tymeslot.ThemeCustomizations do
   Creates or updates a theme customization for a profile and theme. A new
   row starts from the theme's defaults (the schema changeset reads an empty
   row through `Specs.settings/2`), so `attrs` need only hold what changes.
+  See `save_customization/4`.
   """
-  @spec upsert_theme_customization(scope(), theme_id(), map()) ::
-          persistence_result()
+  @spec upsert_theme_customization(
+          scope(),
+          theme_id(),
+          map() | OptionGroup.stored_changes()
+        ) :: persistence_result()
   def upsert_theme_customization(scope, theme_id, attrs) do
-    case get_by_profile_and_theme(scope, theme_id) do
-      nil -> create_theme_customization(scope, theme_id, attrs)
-      customization -> update_theme_customization(customization, attrs)
+    case save_customization(scope, theme_id, attrs, &{:ok, &1}) do
+      {:ok, saved} -> {:ok, saved}
+      {:error, {:raised, error, stacktrace}} -> reraise error, stacktrace
+      {:error, reason} -> {:error, reason}
     end
   end
 
   @doc """
-  Creates a theme customization for a profile and theme.
+  Saves `attrs` on the customisation of a theme for `scope` (see
+  `t:scope/0`), creating it if there is none, then runs `then_fun` with the saved row in the same
+  transaction and returns its result.
+
+  The save takes the row's lock and applies `attrs` to the row as stored at
+  that moment, never to a copy read earlier. So two saves close together (an
+  upload in one tab, an accent change in another) each keep the other's
+  change, and neither can point the row back at a file the other has
+  already deleted. Once the transaction commits, the files of the asset
+  fields this save changed are deleted (`FileLifecycle`).
+
+  `attrs` is a map, or a function of the stored settings and the theme's
+  defaults (`OptionGroup.stored_changes/0`) for changes that depend on what
+  is stored, called on the locked row. `then_fun` returns `{:ok, result}`,
+  or `{:error, reason}` to roll the save back.
+
+  A refused save returns its changeset, and `{:error, :not_found}` means the
+  row was deleted while the save waited for it (its profile was deleted).
+  Anything raised inside the transaction, which is then rolled back, comes
+  back as `{:error, {:raised, exception, stacktrace}}` for the caller to
+  clean up after and re-raise or report; nothing raised after the commit
+  (the file clean-up) is caught.
   """
-  @spec create_theme_customization(scope(), theme_id(), map()) :: persistence_result()
-  def create_theme_customization(scope, theme_id, attrs) do
-    attrs =
-      attrs
+  @spec save_customization(
+          scope(),
+          theme_id(),
+          map() | OptionGroup.stored_changes(),
+          (ThemeCustomizationSchema.t() -> {:ok, result} | {:error, reason})
+        ) :: {:ok, result} | {:error, reason | Changeset.t()}
+        when result: term(), reason: term()
+  def save_customization(scope, theme_id, attrs, then_fun) do
+    transaction =
+      run_transaction(fn ->
+        with {:ok, previous, saved} <- lock_and_write(scope, theme_id, attrs),
+             {:ok, result} <- then_fun.(saved) do
+          {previous, saved, result}
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    case transaction do
+      {:ok, {previous, saved, result}} ->
+        cleanup_replaced_files(theme_id, previous, saved)
+        {:ok, result}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # A COMMIT that raises although the server committed (the connection
+  # dropped while it answered) is caught here as well, so the caller treats
+  # a saved row as unsaved. That in-doubt case is accepted: it cannot be told
+  # apart from a failed commit without another round trip, and the row is
+  # still consistent; at worst an upload's file is deleted while the row
+  # names it, and the page falls back as for a missing file.
+  defp run_transaction(fun) do
+    Repo.transaction(fun)
+  rescue
+    error -> {:error, {:raised, error, __STACKTRACE__}}
+  end
+
+  defp lock_and_write(scope, theme_id, attrs) do
+    case lock(scope, theme_id) do
+      nil -> create_or_write_locked(scope, theme_id, attrs)
+      current -> write_locked(current, attrs)
+    end
+  end
+
+  defp lock({profile_id, page_id}, theme_id),
+    do: ThemeCustomizationQueries.lock_by_page_and_theme(profile_id, page_id, theme_id)
+
+  defp lock(profile_id, theme_id),
+    do: ThemeCustomizationQueries.lock_by_profile_and_theme(profile_id, theme_id)
+
+  # A row created by another request between the read and the insert is
+  # locked and updated instead; if it is gone again by then (its profile
+  # or page was deleted), the save is refused.
+  defp create_or_write_locked(scope, theme_id, attrs) do
+    keyed =
+      %{}
+      |> resolve_attrs(theme_id, attrs)
       |> Map.merge(scope_attrs(scope))
       |> Map.put("theme_id", theme_id)
 
-    # Create the customization with race condition handling
-    case ThemeCustomizationQueries.create(attrs) do
-      {:ok, result} ->
-        {:ok, result}
+    case ThemeCustomizationQueries.create(keyed) do
+      {:ok, :exists} ->
+        case lock(scope, theme_id) do
+          nil -> {:error, :not_found}
+          current -> write_locked(current, attrs)
+        end
+
+      {:ok, created} ->
+        {:ok, nil, created}
 
       {:error, changeset} ->
-        # If we hit a unique constraint, it means another request created it concurrently.
-        # In this case, we should update the existing record instead.
-        if has_unique_constraint_error?(changeset) do
-          case get_by_profile_and_theme(scope, theme_id) do
-            # Should not happen if constraint violated
-            nil -> {:error, changeset}
-            customization -> update_theme_customization(customization, attrs)
-          end
-        else
-          {:error, changeset}
-        end
+        {:error, changeset}
     end
   end
 
-  # Either unique index: the profile's own row or a page's.
-  defp has_unique_constraint_error?(changeset) do
-    Enum.any?(changeset.errors, fn {field, {_msg, opts}} ->
-      field in [:profile_id, :booking_page_id] and Keyword.get(opts, :constraint) == :unique
-    end)
-  end
+  defp write_locked(current, attrs) do
+    changes = current |> to_map() |> resolve_attrs(current.theme_id, attrs)
 
-  @doc """
-  Updates a theme customization using the unified upload system.
-  """
-  @spec update_theme_customization(ThemeCustomizationSchema.t(), map()) ::
-          persistence_result()
-  def update_theme_customization(%ThemeCustomizationSchema{} = customization, attrs) do
-    # Perform the atomic database update, then cleanup replaced files on success
-    case ThemeCustomizationQueries.update(customization, attrs) do
-      {:ok, updated} ->
-        FileLifecycle.cleanup_replaced_files(
-          Specs.for_theme(customization.theme_id),
-          customization,
-          updated
-        )
-
-        {:ok, updated}
-
-      error ->
-        error
+    case ThemeCustomizationQueries.update(current, changes) do
+      {:ok, updated} -> {:ok, current, updated}
+      {:error, changeset} -> {:error, changeset}
     end
   end
+
+  # Changes that depend on what is stored are worked out from the row as
+  # stored (empty before it exists), never from defaults filled in, so a
+  # theme's default cannot pass for the organiser's own choice.
+  defp resolve_attrs(_stored, _theme_id, attrs) when is_map(attrs), do: attrs
+
+  defp resolve_attrs(stored, theme_id, changes_fun) when is_function(changes_fun, 2),
+    do: changes_fun.(stored, get_defaults(theme_id))
+
+  defp cleanup_replaced_files(_theme_id, nil, _saved), do: :ok
+
+  defp cleanup_replaced_files(theme_id, previous, saved),
+    do: FileLifecycle.cleanup_replaced_files(Specs.for_theme(theme_id), previous, saved)
 
   @doc """
   Removes every theme background file stored for a deleted profile. The rows
@@ -234,23 +306,6 @@ defmodule Tymeslot.ThemeCustomizations do
   """
   @spec delete_profile_files(profile_id()) :: :ok | {:error, File.posix(), Path.t()}
   def delete_profile_files(profile_id), do: Storage.delete_profile_directory(profile_id)
-
-  @doc """
-  Deletes a theme customization.
-  """
-  @spec delete_theme_customization(ThemeCustomizationSchema.t()) ::
-          {:ok, ThemeCustomizationSchema.t()} | {:error, Changeset.t()}
-  def delete_theme_customization(%ThemeCustomizationSchema{} = customization) do
-    # Delete database record first, then cleanup files on success
-    case ThemeCustomizationQueries.delete(customization) do
-      {:ok, deleted} ->
-        FileLifecycle.cleanup_all_files(Specs.for_theme(customization.theme_id), customization)
-        {:ok, deleted}
-
-      error ->
-        error
-    end
-  end
 
   @doc """
   The stored settings of a customisation as a string-keyed map, the shape specs
@@ -343,8 +398,8 @@ defmodule Tymeslot.ThemeCustomizations do
          {:ok, changes} <- group.module.changes(field, value, group) do
       # The save starts from the stored settings as `Specs.settings/2` reads
       # them (the schema changeset), so only the change is passed and only
-      # its group is judged. The update deletes any upload the change stops
-      # naming (`update_theme_customization/2`).
+      # its group is judged. The save deletes any upload the change stops
+      # naming (`save_customization/4`).
       scope
       |> upsert_theme_customization(theme_id, changes)
       |> format_persistence_error()
@@ -431,8 +486,8 @@ defmodule Tymeslot.ThemeCustomizations do
     profile_id
     |> ThemeCustomizationQueries.list_for_profile_page()
     |> Enum.reduce_while(:ok, fn row, :ok ->
-      case create_theme_customization({profile_id, page_id}, row.theme_id, copy_attrs(row)) do
-        {:ok, _copy} -> {:cont, :ok}
+      case create_copy({profile_id, page_id}, row.theme_id, copy_attrs(row)) do
+        {:ok, _copy_or_exists} -> {:cont, :ok}
         {:error, changeset} -> skip_or_stop(changeset, row, page_id)
       end
     end)
@@ -456,19 +511,14 @@ defmodule Tymeslot.ThemeCustomizations do
   end
 
   @doc """
-  Deletes a booking page's customizations and their uploaded files. Stops at,
-  and returns, the first failed delete.
+  Deletes a booking page's customizations, then the uploaded files they named
+  as they stood when deleted.
   """
-  @spec delete_page_customizations(pos_integer()) :: :ok | {:error, term()}
+  @spec delete_page_customizations(pos_integer()) :: :ok
   def delete_page_customizations(page_id) do
     page_id
-    |> ThemeCustomizationQueries.list_by_page()
-    |> Enum.reduce_while(:ok, fn row, :ok ->
-      case delete_theme_customization(row) do
-        {:ok, _deleted} -> {:cont, :ok}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
+    |> ThemeCustomizationQueries.delete_by_page()
+    |> Enum.each(&FileLifecycle.cleanup_all_files(Specs.for_theme(&1.theme_id), &1))
   end
 
   @doc "The profile a scope (see `t:scope/0`) belongs to."
@@ -497,6 +547,16 @@ defmodule Tymeslot.ThemeCustomizations do
     |> Enum.any?(fn {field, _kind} ->
       Map.get(settings, Atom.to_string(field)) not in [nil, ""]
     end)
+  end
+
+  # A plain insert rather than `save_customization/4`: `copy_to_page/2` runs
+  # inside the page's creation transaction, which a nested save's rollback of
+  # one refused row would doom, while a refused copy is meant to be skipped.
+  defp create_copy(scope, theme_id, attrs) do
+    attrs
+    |> Map.merge(scope_attrs(scope))
+    |> Map.put("theme_id", theme_id)
+    |> ThemeCustomizationQueries.create()
   end
 
   defp scope_attrs({profile_id, page_id}),

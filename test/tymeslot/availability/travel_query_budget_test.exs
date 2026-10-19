@@ -15,13 +15,15 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
   @moduletag :availability
   @moduletag :integration
 
+  import Mox
   import Tymeslot.Factory
 
   alias Tymeslot.Availability.Calculate
   alias Tymeslot.Availability.Offer
   alias Tymeslot.Availability.Reach
+  alias Tymeslot.Availability.Schedules
   alias Tymeslot.Availability.Travel
-  alias Tymeslot.Bookings.Policy
+  alias Tymeslot.CalendarMock
   alias TymeslotWeb.Live.Scheduling.CalendarHelpers
 
   @home "America/New_York"
@@ -32,6 +34,13 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
   defp wednesday_at_least(days_ahead) do
     base = Date.add(Date.utc_today(), days_ahead)
     Date.add(base, rem(10 - Date.day_of_week(base), 7))
+  end
+
+  setup :verify_on_exit!
+
+  setup do
+    stub(CalendarMock, :get_events_for_range_fresh, fn _user_id, _start, _end -> {:ok, []} end)
+    :ok
   end
 
   setup do
@@ -132,7 +141,7 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
 
   describe "trip lookups per fetch" do
     test "a slot check runs one trip query, not one per adjacent day", ctx do
-      config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       # `BusinessHours` resolves `date - 1`, `date` and `date + 1`, each of
       # which reaches `OwnerFrame`; without the prefetch beside
@@ -149,7 +158,7 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
     end
 
     test "a range runs one trip query for the whole window, not one per day", ctx do
-      config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       count =
         count_trip_queries(ctx.profile.id, fn ->
@@ -318,18 +327,16 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
     end
   end
 
-  # The calendar seam the flow already has for tests: a one-argument function
-  # stands in for the provider, so this asks nothing of the calendar layer.
   # `Tymeslot.Availability.Offer` took over the display path's slot and range
   # call sites, so these tests drive it through its own request map rather than
-  # the old `AvailabilityHelpers` arguments.
+  # the old `AvailabilityHelpers` arguments. The calendar it reads is stubbed in
+  # `setup`.
   defp request(ctx) do
     %{
       profile: ctx.profile,
       user_timezone: @home,
       meeting_type: ctx.meeting_type,
-      demo_mode?: false,
-      debug_calendar_module: fn _organizer_user_id -> {:ok, []} end
+      demo_mode?: false
     }
   end
 end

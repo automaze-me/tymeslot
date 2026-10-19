@@ -38,7 +38,7 @@ defmodule Tymeslot.Meetings.CalendarMove do
   already-moved booking is refused as `:not_flagged`.
   """
 
-  alias Tymeslot.Bookings.Reschedule
+  alias Tymeslot.Bookings.FollowCalendar
   alias Tymeslot.Clock
   alias Tymeslot.Integrations.Calendar.ProviderCalendarEventQueries
   alias Tymeslot.Jobs
@@ -100,7 +100,7 @@ defmodule Tymeslot.Meetings.CalendarMove do
   def move(meeting_id, organizer_user_id) do
     with {:ok, meeting} <- MeetingQueries.get_meeting_for_organizer(meeting_id, organizer_user_id),
          {:ok, %{start_time: start_time, end_time: end_time}} <- offer(meeting) do
-      Reschedule.follow_calendar(meeting, start_time, end_time)
+      FollowCalendar.execute(meeting, start_time, end_time)
     end
   end
 

@@ -7,20 +7,11 @@ defmodule Tymeslot.ThemeCustomizations.PageUploadsTest do
   import Tymeslot.Factory
 
   alias Tymeslot.Test.MediaFixtures
+  alias Tymeslot.Test.UploadRoot
   alias Tymeslot.ThemeCustomizations
-  alias Tymeslot.ThemeCustomizations.Storage
 
   setup do
-    upload_root =
-      Path.join(System.tmp_dir!(), "tymeslot_uploads_#{System.unique_integer([:positive])}")
-
-    original_root = Application.get_env(:tymeslot, :upload_directory)
-    Application.put_env(:tymeslot, :upload_directory, upload_root)
-
-    on_exit(fn ->
-      Application.put_env(:tymeslot, :upload_directory, original_root)
-      File.rm_rf(upload_root)
-    end)
+    UploadRoot.isolate("tymeslot_page_uploads")
 
     profile = insert(:profile)
     page = insert(:booking_page, profile: profile)
@@ -52,7 +43,7 @@ defmodule Tymeslot.ThemeCustomizations.PageUploadsTest do
 
     assert :ok = ThemeCustomizations.delete_page_customizations(ctx.page.id)
 
-    assert File.exists?(Storage.build_theme_file_path(profile_path))
-    refute File.exists?(Storage.build_theme_file_path(page_path))
+    assert File.exists?(UploadRoot.path(profile_path))
+    refute File.exists?(UploadRoot.path(page_path))
   end
 end

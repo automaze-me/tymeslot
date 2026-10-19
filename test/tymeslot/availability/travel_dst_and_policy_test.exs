@@ -8,8 +8,8 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
 
   alias Tymeslot.Availability.BusinessHours
   alias Tymeslot.Availability.Calculate
+  alias Tymeslot.Availability.Schedules
   alias Tymeslot.Availability.Travel
-  alias Tymeslot.Bookings.Policy
   alias Tymeslot.Utils.DateTimeUtils
 
   @home "America/New_York"
@@ -138,7 +138,7 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
     test "the schedule's booking horizon still gates a trip date" do
       %{user: user, meeting_type: meeting_type, wednesday: wednesday} = policy_setup(10)
 
-      config = Policy.scheduling_config(user.id, meeting_type)
+      config = Schedules.booking_config(user.id, meeting_type)
 
       # All three policy values come from the schedule, never from the trip —
       # `TravelPeriodSchema` has no fields for any of them.
@@ -159,7 +159,7 @@ defmodule Tymeslot.Availability.TravelDstAndPolicyTest do
     test "the same trip date is offered once the horizon allows it, at the trip's hours" do
       %{user: user, meeting_type: meeting_type, wednesday: wednesday} = policy_setup(365)
 
-      config = Policy.scheduling_config(user.id, meeting_type)
+      config = Schedules.booking_config(user.id, meeting_type)
 
       assert config.buffer_before_minutes == 0
 

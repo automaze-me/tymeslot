@@ -18,9 +18,10 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
 
   use Gettext, backend: TymeslotWeb.Gettext
 
-  alias Tymeslot.Availability.{AvailabilityActions, Travel}
+  alias Tymeslot.Availability.Travel
   alias Tymeslot.Timezones
-  alias Tymeslot.Utils.ChangesetUtils
+  alias TymeslotWeb.Helpers.FormErrors
+  alias TymeslotWeb.Helpers.LocaleFormat
   alias TymeslotWeb.Live.Shared.Flash
 
   @events ~w(
@@ -234,9 +235,12 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelFormHandler do
     end
   end
 
+  defp day_name(day),
+    do: LocaleFormat.format_weekday_name(day, Gettext.get_locale(TymeslotWeb.Gettext), :full)
+
   defp day_error_message(failures) do
     Enum.map_join(failures, "; ", fn {:error, day_of_week, changeset} ->
-      "#{AvailabilityActions.day_name(day_of_week)}: #{ChangesetUtils.get_first_error(changeset)}"
+      "#{day_name(day_of_week)}: #{FormErrors.first(changeset)}"
     end)
   end
 

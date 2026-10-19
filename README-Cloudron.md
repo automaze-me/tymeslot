@@ -28,23 +28,21 @@ Tymeslot is designed to work seamlessly with Cloudron's managed infrastructure. 
 
 There are two ways to install Tymeslot on Cloudron:
 
-### Option A: Community Package (Recommended)
+### Option A: Cloudron App Store (Recommended)
 
-Install via Cloudron's [community package system](https://forum.cloudron.io/topic/15046/update-on-community-packages). This gives you automatic update notifications and one-click upgrades — the same experience as official Cloudron apps.
+Tymeslot is listed in the [Cloudron App Store](https://www.cloudron.io/store/tymeslot.html), packaged and maintained by Cloudron, with automatic update notifications and one-click upgrades.
 
 1. Open your Cloudron dashboard and go to **App Store**
-2. Click **Install via URL**
-3. Paste the following URL:
-   ```
-   https://raw.githubusercontent.com/Tymeslot/tymeslot/main/CloudronVersions.json
-   ```
-4. Choose a location (e.g. `tymeslot.yourdomain.com`) and click **Install**
+2. Search for **Tymeslot** and open it
+3. Choose a location (e.g. `tymeslot.yourdomain.com`) and click **Install**
 
-Cloudron handles the Docker image, health checks, and updates automatically. When a new version is published, you'll see an update prompt in the dashboard.
+Cloudron handles the Docker image, health checks, and updates automatically. When a new version is published, you'll see an update prompt in the dashboard. Cloudron's own notes for the package are at [docs.cloudron.io/packages/tymeslot](https://docs.cloudron.io/packages/tymeslot), and questions about it go to the [Tymeslot category of the Cloudron forum](https://forum.cloudron.io/category/449/tymeslot).
+
+> **Installed earlier with Install via URL?** The community package installed from `https://raw.githubusercontent.com/Tymeslot/tymeslot/main/CloudronVersions.json` is being retired: it receives one more update, and none after that. The App Store version is a separate app, so an existing installation does not move over by itself; install Tymeslot from the App Store as a new app.
 
 ### Option B: Manual Docker Build
 
-Build and install from source using the Cloudron CLI. Use this if you want to run a custom fork or a version not yet published to the community package.
+Build and install from source using the Cloudron CLI. Use this if you want to run a custom fork or a version not yet published to the App Store.
 
 1. Clone the repository and build the Docker image:
    ```bash
@@ -186,19 +184,42 @@ credentials undecryptable. No action is required for new installs.
 **Upgrading an existing install:** the key is generated on the first boot after the upgrade.
 New credentials are written under it immediately; existing credentials keep decrypting under
 the old (`SECRET_KEY_BASE`-derived) key automatically. To migrate the existing rows onto the
-new key, run the re-encryption sweep once. `cloudron exec` starts a fresh session that does
-not see the key unless it is read from the file it was generated into, so export it first:
+new key, run the re-encryption sweep. The container also writes the generated key into
+`/app/data/.env`, which is how a `cloudron exec` session sees it:
 
 ```bash
-cloudron exec --app tymeslot.yourdomain.com -- sh -c '
-  export DATA_ENCRYPTION_KEY=$(cat /app/data/data_encryption_key)
-  /app/bin/tymeslot eval "Ecto.Migrator.with_repo(Tymeslot.Repo, fn _ -> IO.inspect(Tymeslot.Security.CredentialReencryption.run(), label: \"reencryption\") end)"
-'
+cloudron exec --app tymeslot.yourdomain.com -- \
+  /app/bin/tymeslot eval "Tymeslot.Release.Encryption.reencrypt_credentials()"
 ```
 
-Re-run until the reported `migrated_values` is `0`. The sweep is idempotent and safe to
-repeat. Do not delete `/app/data/data_encryption_key` — losing it makes stored credentials
-unrecoverable.
+Re-run until it reports `migrated values: 0`. The sweep is idempotent and safe to repeat. Then
+check that nothing is left on the legacy key:
+
+```bash
+cloudron exec --app tymeslot.yourdomain.com -- \
+  /app/bin/tymeslot eval "Tymeslot.Release.Encryption.key_report()"
+```
+
+Once no `v0` appears, add `LEGACY_KEY_RETIRED=true` to `/app/data/.env` and restart; from then
+on `SECRET_KEY_BASE` plays no part in data-at-rest encryption. Do not delete
+`/app/data/data_encryption_key` (losing it makes stored credentials unrecoverable), except to
+retire it after a rotation, as below.
+
+**Rotating the key.** The procedure, and what each report means, is in
+[README-Docker.md, "Rotating the data key"](README-Docker.md#rotating-the-data-key). On Cloudron:
+
+1. Read the current key with
+   `cloudron exec --app tymeslot.yourdomain.com -- cat /app/data/data_encryption_key`. It is
+   key 1, and stays loaded as key 1 while that file exists.
+2. Put `DATA_ENCRYPTION_KEYS` in `/app/data/.env` rather than in `cloudron env set`, so that it
+   travels with the app's backups together with the key file. A Cloudron app runs as a single
+   container, stopped before its replacement starts, so phases 1 and 2 may be one restart:
+   `DATA_ENCRYPTION_KEYS=2:<new key>,1:<current key>`. Back up the app first.
+3. Run the sweep and the key report as above until no `v1` remains, `oban_jobs.email_links`
+   included (links in emails still queued; they clear as the emails go out).
+4. Retire key 1: remove the `1:` entry, delete `/app/data/data_encryption_key` and the
+   `DATA_ENCRYPTION_KEY=` line in `/app/data/.env`, and restart. With `DATA_ENCRYPTION_KEYS`
+   set, the container no longer generates a replacement key.
 
 ### Adding Variables After Installation
 
@@ -438,9 +459,9 @@ Tymeslot records every unexpected error, process crash and failed background job
 
 ## Updates
 
-### Community Package (Option A)
+### Cloudron App Store (Option A)
 
-Cloudron checks for new versions automatically. When a new release is published, you'll see an update prompt in the dashboard — apply it with one click or via CLI:
+Cloudron checks for new versions automatically. When a new release is published, you'll see an update prompt in the dashboard; apply it with one click or via CLI:
 
 ```bash
 cloudron update --app tymeslot.yourdomain.com

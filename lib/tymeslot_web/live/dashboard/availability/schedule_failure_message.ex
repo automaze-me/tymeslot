@@ -13,10 +13,12 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.ScheduleFailureMessage do
 
   alias Ecto.Changeset
   alias Tymeslot.Availability.Schedules
-  alias Tymeslot.Utils.ChangesetUtils
+  alias TymeslotWeb.Helpers.FormErrors
 
   @spec for_reason(Changeset.t() | atom() | String.t()) :: String.t()
-  def for_reason(%Changeset{} = changeset), do: ChangesetUtils.get_first_error(changeset)
+  def for_reason(%Changeset{} = changeset),
+    do: FormErrors.first(changeset, %{name: dgettext("dashboard_availability", "Schedule name")})
+
   def for_reason(message) when is_binary(message), do: message
 
   def for_reason(:schedule_limit_reached) do

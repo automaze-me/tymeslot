@@ -241,7 +241,7 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.ThemeCustomizationComponent do
 
       {:noreply, socket}
     else
-      case RateLimiter.check_theme_customization_rate_limit(user_id) do
+      case RateLimiter.check(:theme_customization, user_id) do
         :ok ->
           operation.()
 

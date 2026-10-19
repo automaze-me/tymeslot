@@ -67,6 +67,31 @@ defmodule Tymeslot.ThemeCustomizations.PageScopeTest do
              ThemeCustomizations.get_by_profile_and_theme(ctx.profile.id, "1")
   end
 
+  test "a save in page scope updates the page's existing row, not the profile's", ctx do
+    insert(:theme_customization, profile: ctx.profile, theme_id: "1", color_scheme: "ocean")
+
+    page_row =
+      insert(:theme_customization,
+        profile: ctx.profile,
+        booking_page: ctx.page,
+        theme_id: "1",
+        color_scheme: "rose"
+      )
+
+    {:ok, saved} =
+      ThemeCustomizations.apply_option({ctx.profile.id, ctx.page.id}, "1", :palette, %{
+        "field" => "scheme",
+        "value" => "purple"
+      })
+
+    assert saved.id == page_row.id
+    assert saved.settings["color_scheme"] == "purple"
+    assert length(Repo.all(ThemeCustomizationSchema)) == 2
+
+    assert %{settings: %{"color_scheme" => "ocean"}} =
+             ThemeCustomizations.get_by_profile_and_theme(ctx.profile.id, "1")
+  end
+
   test "scope_for reads a page off an overlaid profile", ctx do
     assert ThemeCustomizations.scope_for(ctx.profile) == ctx.profile.id
 
@@ -121,10 +146,10 @@ defmodule Tymeslot.ThemeCustomizations.PageScopeTest do
   end
 
   describe "uniqueness" do
-    test "a second row for the same page and theme is refused", ctx do
+    test "a second row for the same page and theme is not created", ctx do
       insert(:theme_customization, profile: ctx.profile, booking_page: ctx.page, theme_id: "1")
 
-      assert {:error, changeset} =
+      assert {:ok, :exists} =
                ThemeCustomizationQueries.create(%{
                  "profile_id" => ctx.profile.id,
                  "booking_page_id" => ctx.page.id,
@@ -134,13 +159,13 @@ defmodule Tymeslot.ThemeCustomizations.PageScopeTest do
                  "background_value" => "gradient_1"
                })
 
-      assert %{booking_page_id: [_message]} = errors_on(changeset)
+      assert length(Repo.all(ThemeCustomizationSchema)) == 1
     end
 
-    test "a second profile-scope row for the same theme is still refused", ctx do
+    test "a second profile-scope row for the same theme is still not created", ctx do
       insert(:theme_customization, profile: ctx.profile, theme_id: "1")
 
-      assert {:error, changeset} =
+      assert {:ok, :exists} =
                ThemeCustomizationQueries.create(%{
                  "profile_id" => ctx.profile.id,
                  "theme_id" => "1",
@@ -149,7 +174,7 @@ defmodule Tymeslot.ThemeCustomizations.PageScopeTest do
                  "background_value" => "gradient_1"
                })
 
-      assert %{profile_id: [_message]} = errors_on(changeset)
+      assert length(Repo.all(ThemeCustomizationSchema)) == 1
     end
 
     test "a profile row and a page row for the same theme coexist", ctx do

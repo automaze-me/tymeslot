@@ -1,6 +1,7 @@
 # Move a booking to the time its calendar event was moved to
 
-**Status:** implemented on merge-upstream-1.26.0
+**Status:** implemented on merge-upstream-1.26.0; carried to upstream 1.27
+(see "On 1.27" at the end)
 **Date:** 2026-10-19
 **Branch:** to be cut from `merge-upstream-1.26.0`
 **Fork:** `automaze-me/tymeslot`, written to be offered upstream as an issue
@@ -201,3 +202,25 @@ does nothing to the booking and says why.
 - Dashboard: the button appears only when offered, shows the event's time,
   and clicking through the dialog moves the booking and clears the warning.
 - Email: the modification email's new line and button target.
+
+## On 1.27
+
+Upstream 1.27 reworked the code this builds on, so the merge moved the
+feature onto it:
+
+- The move is written by `Tymeslot.Bookings.FollowCalendar`, not
+  `Reschedule.follow_calendar/3`. 1.27 moved reminders into the reschedule's
+  transaction and took the calendar revision from the locked row; with that,
+  sharing `Reschedule`'s internals would have pushed the module past the
+  650-line cap. The write follows the shape of upstream's own end-change
+  path (`ExternalCalendarChanges.apply_end_change/2`): row lock, reminders
+  re-pinned in the transaction, then availability, video room and the
+  reschedule notices. This departs from "Constraints" above (reuse rather
+  than copy) on purpose; `Reschedule` keeps only the flag clearing.
+- The move records the event's end as `seen_calendar_end_time`, the end
+  1.27 measures a later end change in the calendar against.
+- Reschedule emails go out from upstream's retrying email job; `moved_by:
+  :host` travels in the job's arguments.
+- Upstream's external-change email already links the host to the booking in
+  their dashboard (`MeetingLinks.host_view_url/1`), so the fork changes only
+  its copy, now in the `emails_booking_changes` domain.

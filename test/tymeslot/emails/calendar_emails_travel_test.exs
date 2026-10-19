@@ -65,10 +65,10 @@ defmodule Tymeslot.Emails.CalendarEmailsTravelTest do
 
       email = next_email()
 
-      # 14:00 UTC is 03:00 PM in Europe/Berlin (CET, UTC+1 on this date) and
+      # 14:00 UTC is 3:00 PM in Europe/Berlin (CET, UTC+1 on this date) and
       # 10:00 AM in America/New_York (EDT, UTC-4). This fails if the resolver
       # stops asking `Travel` for the trip in effect on the meeting's date.
-      assert email.text_body =~ "03:00 PM"
+      assert email.text_body =~ "3:00 PM"
       refute email.text_body =~ "10:00 AM"
     end
 

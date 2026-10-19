@@ -4,7 +4,7 @@ defmodule Tymeslot.Availability.Travel do
   differ. The sibling of `Tymeslot.Availability.Schedules`.
 
   `for_window/3` is the single trip resolver, called by both
-  `Tymeslot.Bookings.Policy.scheduling_config/2` (the submit path) and the
+  `Tymeslot.Availability.Schedules.booking_config/2` (the submit path) and the
   booking page's display path. Having one resolver is what makes the two paths
   structurally unable to disagree about which trips apply — the same reason
   `Schedules.slot_interval_minutes/1` exists.

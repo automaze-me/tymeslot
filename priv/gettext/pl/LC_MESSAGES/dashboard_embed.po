@@ -1,3 +1,4 @@
+#
 msgid ""
 msgstr ""
 "Project-Id-Version: tymeslot\n"
@@ -431,6 +432,13 @@ msgstr "Usuń %{domain}"
 #, elixir-autogen, elixir-format
 msgid "Booking page"
 msgstr "Strona rezerwacji"
+
+#. The separator between two problems with the domains entered, as in: Invalid domain, Invalid domain format
+#: lib/tymeslot_web/live/dashboard/embed_settings_component.ex
+#, elixir-autogen, elixir-format
+msgctxt "list separator"
+msgid ", "
+msgstr ", "
 
 #: lib/tymeslot_web/live/dashboard/embed_settings/security_section.ex
 #, elixir-autogen, elixir-format

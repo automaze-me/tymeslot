@@ -51,40 +51,79 @@ defmodule Tymeslot.ThemeCustomizations.ThemeCustomizationQueries do
   end
 
   @doc """
-  A booking page's customizations.
+  Deletes a booking page's customizations and returns them as they stood when
+  deleted.
   """
-  @spec list_by_page(integer()) :: [ThemeCustomizationSchema.t()]
-  def list_by_page(page_id) do
-    query = from(tc in ThemeCustomizationSchema, where: tc.booking_page_id == ^page_id)
+  @spec delete_by_page(integer()) :: [ThemeCustomizationSchema.t()]
+  def delete_by_page(page_id) do
+    query =
+      from(tc in ThemeCustomizationSchema, where: tc.booking_page_id == ^page_id, select: tc)
 
-    Repo.all(query)
+    {_count, deleted} = Repo.delete_all(query)
+    deleted
   end
 
   @doc """
-  Gets all theme customizations for a profile.
-
-  Its booking pages' rows carry the profile id too, so they are included:
-  `list_for_profile_page/1` returns the profile's own page's rows alone.
+  The profile's own customisation of `theme_id` (never one of its booking
+  pages'), locked `FOR UPDATE` until the surrounding transaction ends; `nil`
+  when there is none.
   """
-  @spec get_all_by_profile_id(integer()) :: [ThemeCustomizationSchema.t()]
-  def get_all_by_profile_id(profile_id) do
-    ThemeCustomizationSchema
-    |> where([tc], tc.profile_id == ^profile_id)
-    |> Repo.all()
+  @spec lock_by_profile_and_theme(integer(), String.t()) :: ThemeCustomizationSchema.t() | nil
+  def lock_by_profile_and_theme(profile_id, theme_id) do
+    Repo.one(
+      from(c in ThemeCustomizationSchema,
+        where: c.profile_id == ^profile_id and c.theme_id == ^theme_id,
+        where: is_nil(c.booking_page_id),
+        lock: "FOR UPDATE"
+      )
+    )
   end
 
   @doc """
-  Creates a theme customization.
+  A booking page's customisation of `theme_id`, locked as
+  `lock_by_profile_and_theme/2` locks the profile's. The profile id must be
+  the one the row belongs to, so another profile's id misses.
   """
-  @spec create(map()) :: {:ok, ThemeCustomizationSchema.t()} | {:error, Ecto.Changeset.t()}
+  @spec lock_by_page_and_theme(integer(), integer(), String.t()) ::
+          ThemeCustomizationSchema.t() | nil
+  def lock_by_page_and_theme(profile_id, page_id, theme_id) do
+    Repo.one(
+      from(c in ThemeCustomizationSchema,
+        where:
+          c.profile_id == ^profile_id and c.booking_page_id == ^page_id and
+            c.theme_id == ^theme_id,
+        lock: "FOR UPDATE"
+      )
+    )
+  end
+
+  @doc """
+  Creates a theme customization, or returns `{:ok, :exists}` without writing
+  anything when its profile or booking page already has one for the theme
+  (another request created it first).
+
+  No conflict target: the profile's rows and a page's rows each have their own
+  unique index, the profile's partial (`booking_page_id IS NULL`), and a bare
+  `ON CONFLICT DO NOTHING` covers whichever the row falls under.
+  """
+  @spec create(map()) ::
+          {:ok, ThemeCustomizationSchema.t() | :exists} | {:error, Ecto.Changeset.t()}
   def create(attrs) do
-    %ThemeCustomizationSchema{}
-    |> ThemeCustomizationSchema.changeset(attrs)
-    |> Repo.insert()
+    inserted =
+      %ThemeCustomizationSchema{}
+      |> ThemeCustomizationSchema.changeset(attrs)
+      |> Repo.insert(on_conflict: :nothing)
+
+    case inserted do
+      {:ok, %ThemeCustomizationSchema{id: nil}} -> {:ok, :exists}
+      result -> result
+    end
   end
 
   @doc """
-  Updates a theme customization.
+  Updates a theme customization. Callers hold the row's lock
+  (`lock_by_profile_and_theme/2`), since the changeset rebuilds the whole
+  settings map from `customization`.
   """
   @spec update(ThemeCustomizationSchema.t(), map()) ::
           {:ok, ThemeCustomizationSchema.t()} | {:error, Ecto.Changeset.t()}
@@ -92,15 +131,6 @@ defmodule Tymeslot.ThemeCustomizations.ThemeCustomizationQueries do
     customization
     |> ThemeCustomizationSchema.changeset(attrs)
     |> Repo.update()
-  end
-
-  @doc """
-  Deletes a theme customization.
-  """
-  @spec delete(ThemeCustomizationSchema.t()) ::
-          {:ok, ThemeCustomizationSchema.t()} | {:error, Ecto.Changeset.t()}
-  def delete(%ThemeCustomizationSchema{} = customization) do
-    Repo.delete(customization)
   end
 
   @doc """
@@ -147,6 +177,42 @@ defmodule Tymeslot.ThemeCustomizations.ThemeCustomizationQueries do
     case Repo.update_all(query, []) do
       {1, [customization]} -> {:ok, customization}
       {0, []} -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Records the processing state of the video in `field`, as
+  `update_video_processing_status/3` does, but only while `video_path` is
+  still the video that field holds. A transcode of a video that has since
+  been replaced or removed must not report its outcome against the row.
+
+  Returns `{:error, :replaced}` when the field no longer holds that video, or
+  the customisation no longer exists.
+  """
+  @spec update_video_processing_status_for(integer(), String.t(), String.t(), String.t()) ::
+          :ok | {:error, :replaced}
+  def update_video_processing_status_for(id, field, video_path, status)
+      when is_binary(field) and is_binary(video_path) and status in @video_processing_states do
+    query =
+      from(c in ThemeCustomizationSchema,
+        where: c.id == ^id and fragment("?->>?", c.settings, ^field) == ^video_path,
+        update: [
+          set: [
+            video_processing_status:
+              fragment(
+                "? || jsonb_build_object(?::text, ?::text)",
+                c.video_processing_status,
+                ^field,
+                ^status
+              ),
+            updated_at: ^DateTime.utc_now(:second)
+          ]
+        ]
+      )
+
+    case Repo.update_all(query, []) do
+      {1, _rows} -> :ok
+      {0, _rows} -> {:error, :replaced}
     end
   end
 end

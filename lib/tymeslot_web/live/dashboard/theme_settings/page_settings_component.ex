@@ -154,7 +154,7 @@ defmodule TymeslotWeb.Dashboard.ThemeSettings.PageSettingsComponent do
   def handle_event("toggle_type", %{"id" => id}, socket) do
     user_id = socket.assigns.profile.user_id
 
-    with_rate_limit(RateLimiter.check_meeting_type_write_rate_limit(user_id), socket, fn ->
+    with_rate_limit(RateLimiter.check(:meeting_type_write, user_id), socket, fn ->
       do_toggle_type(socket, id, user_id)
     end)
   end

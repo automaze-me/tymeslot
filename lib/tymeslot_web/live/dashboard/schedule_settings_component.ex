@@ -13,12 +13,12 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
 
   alias Tymeslot.Availability.{
     AvailabilityActions,
+    PolicyValidation,
     Schedules,
     Travel,
     WeeklySchedule
   }
 
-  alias Tymeslot.MeetingTypes.InputValidation, as: MeetingSettingsInputValidation
   alias Tymeslot.Timezones
   alias Tymeslot.Validation.Constraints
 
@@ -31,6 +31,8 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
     ScheduleSwitcher,
     TimeOffCard
   }
+
+  alias TymeslotWeb.Dashboard.Availability.ListComponent.BreakHelpers
 
   alias TymeslotWeb.Live.Dashboard.Availability.{
     DeleteModalHandler,
@@ -169,6 +171,10 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
           Flash.info(duplicate_message(schedule))
           {:noreply, select_and_reload(socket, copy.id)}
 
+        {:error, {:break_outside_hours, day, break}} ->
+          Flash.error(BreakHelpers.stale_break_message(day, break, socket.assigns.time_format))
+          {:noreply, socket}
+
         {:error, reason} ->
           Flash.error(ScheduleFailureMessage.for_reason(reason))
           {:noreply, socket}
@@ -233,7 +239,7 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
     |> assign(:selected_schedule, selected)
     |> assign(:selected_schedule_id, selected && selected.id)
     |> assign(:meeting_type_names, meeting_type_names_for(selected))
-    |> assign(:weekly_schedule, weekly_schedule_for(selected))
+    |> assign(:weekly_schedule, weekly_schedule_for(socket.assigns.profile.id, selected))
     |> assign(:saving, false)
   end
 
@@ -274,12 +280,11 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   defp pick_selected([first | _rest] = schedules, id),
     do: Enum.find(schedules, first, &(&1.id == id))
 
-  defp weekly_schedule_for(nil), do: []
+  defp weekly_schedule_for(_profile_id, nil), do: []
 
-  defp weekly_schedule_for(schedule) do
-    schedule.id
-    |> WeeklySchedule.get_weekly_schedule()
-    |> AvailabilityActions.ensure_complete_schedule(schedule.id)
+  defp weekly_schedule_for(profile_id, schedule) do
+    weekly_schedule = WeeklySchedule.get_weekly_schedule(schedule.id)
+    AvailabilityActions.ensure_complete_schedule(profile_id, weekly_schedule, schedule.id)
   end
 
   defp close_menu(socket), do: assign(socket, :schedule_menu_open, false)
@@ -360,7 +365,7 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
 
     metadata = DashboardHelpers.get_security_metadata(socket)
 
-    with {:ok, value} <- validate_policy(field, submitted, metadata: metadata),
+    with {:ok, value} <- PolicyValidation.validate(field, submitted, metadata: metadata),
          {:ok, schedule} <-
            Schedules.update_policy(socket.assigns.selected_schedule, %{field => value}) do
       Flash.info(policy_flash(field, Map.fetch!(schedule, field)))
@@ -423,18 +428,6 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   defp policy_default(field) do
     Constraints.scheduling_policy_defaults() |> Map.fetch!(field) |> to_string()
   end
-
-  defp validate_policy(:buffer_before_minutes, value, opts),
-    do: MeetingSettingsInputValidation.validate_buffer_before_minutes(value, opts)
-
-  defp validate_policy(:buffer_after_minutes, value, opts),
-    do: MeetingSettingsInputValidation.validate_buffer_after_minutes(value, opts)
-
-  defp validate_policy(:advance_booking_days, value, opts),
-    do: MeetingSettingsInputValidation.validate_advance_booking_days(value, opts)
-
-  defp validate_policy(:min_advance_hours, value, opts),
-    do: MeetingSettingsInputValidation.validate_min_advance_hours(value, opts)
 
   defp policy_flash(:buffer_before_minutes, value),
     do:

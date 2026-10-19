@@ -24,8 +24,9 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
   use TymeslotWeb, :html
   use Gettext, backend: TymeslotWeb.Gettext
 
-  alias Tymeslot.Availability.{AvailabilityActions, TravelPeriodSchema}
+  alias Tymeslot.Availability.TravelPeriodSchema
   alias TymeslotWeb.Components.TimezoneDropdown
+  alias TymeslotWeb.Helpers.LocaleFormat
   alias TymeslotWeb.Live.Shared.FormValidationHelpers
 
   @weekdays 1..7
@@ -134,7 +135,11 @@ defmodule TymeslotWeb.Live.Dashboard.Availability.TravelForm do
                 checked={day_checked?(@values, day_of_week)}
                 class="checkbox w-5 h-5 rounded border-tymeslot-300 text-turquoise-600 focus:ring-turquoise-500"
               />
-              {AvailabilityActions.day_name(day_of_week)}
+              {LocaleFormat.format_weekday_name(
+                day_of_week,
+                Gettext.get_locale(TymeslotWeb.Gettext),
+                :full
+              )}
             </label>
 
             <input

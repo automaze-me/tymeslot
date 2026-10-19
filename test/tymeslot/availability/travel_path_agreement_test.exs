@@ -4,14 +4,24 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
   @moduletag :availability
   @moduletag :integration
 
+  import Mox
   import Tymeslot.Factory
 
   alias Tymeslot.Availability.Calculate
   alias Tymeslot.Availability.Offer
+  alias Tymeslot.Availability.Schedules
   alias Tymeslot.Availability.Travel
-  alias Tymeslot.Bookings.Policy
   alias Tymeslot.Bookings.ScheduleCheck
+  alias Tymeslot.CalendarMock
   alias Tymeslot.Utils.DateTimeUtils
+
+  setup :verify_on_exit!
+
+  # The booking page reads the host's calendar; this host has none to read.
+  setup do
+    stub(CalendarMock, :get_events_for_range_fresh, fn _user_id, _start, _end -> {:ok, []} end)
+    :ok
+  end
 
   @home "America/New_York"
   @away "Europe/Berlin"
@@ -117,7 +127,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
       assert ctx.active_trip.timezone == @active
       refute Travel.for_window(ctx.profile.id, Date.utc_today(), Date.utc_today()) == []
 
-      config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       {:ok, slots} =
         Calculate.available_slots(ctx.after_trip, 30, @home, config.owner_timezone, [], config)
@@ -140,14 +150,14 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
 
   describe "the submit path" do
     test "carries the profile id so trips resolve", ctx do
-      config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       assert config.profile_id == ctx.profile.id
       assert config.owner_timezone == @home
     end
 
     test "offers trip hours for a date inside the trip", ctx do
-      config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       {:ok, slots} =
         Calculate.available_slots(ctx.in_trip, 30, @home, config.owner_timezone, [], config)
@@ -164,7 +174,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
     end
 
     test "offers home hours for a date after the trip", ctx do
-      config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       {:ok, slots} =
         Calculate.available_slots(ctx.after_trip, 30, @home, config.owner_timezone, [], config)
@@ -177,7 +187,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
 
   describe "agreement between the display path and the submit path" do
     test "every slot offered inside a trip is accepted by the re-check", ctx do
-      config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       {:ok, slots} =
         Calculate.available_slots(ctx.in_trip, 30, @home, config.owner_timezone, [], config)
@@ -201,7 +211,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
     end
 
     test "every slot offered after a trip is accepted by the re-check", ctx do
-      config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       {:ok, slots} =
         Calculate.available_slots(ctx.after_trip, 30, @home, config.owner_timezone, [], config)
@@ -223,7 +233,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
     end
 
     test "a home-hours slot inside the trip window is refused", ctx do
-      config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       # 09:00 New York is 15:00 Berlin, inside 10:00-16:00, so pick a time that
       # is bookable at home but outside the trip's hours: 11:00 New York is
@@ -312,7 +322,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
 
   describe "the booking page's own fetch" do
     test "resolves trip hours through the slot-list call site", ctx do
-      submit_config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      submit_config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       {:ok, page_slots} =
         Offer.slots_for_date(request(ctx), Date.to_iso8601(ctx.in_trip), 30)
@@ -332,7 +342,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
     end
 
     test "resolves trip hours through the calendar-range call site", ctx do
-      submit_config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+      submit_config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
       # The trip runs Monday to Friday but offers Wednesday alone, so the
       # Thursday inside it is bookable at home and not on the trip. The grid
@@ -369,8 +379,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
       profile: ctx.profile,
       user_timezone: @home,
       meeting_type: ctx.meeting_type,
-      demo_mode?: false,
-      debug_calendar_module: fn _organizer_user_id -> {:ok, []} end
+      demo_mode?: false
     }
   end
 
@@ -383,7 +392,7 @@ defmodule Tymeslot.Availability.TravelPathAgreementTest do
   # literal and still disagree with each other; these assertions can only pass
   # if the paths agree with each other.
   defp assert_paths_agree(ctx, date) do
-    submit_config = Policy.scheduling_config(ctx.user.id, ctx.meeting_type)
+    submit_config = Schedules.booking_config(ctx.user.id, ctx.meeting_type)
 
     display_config =
       ctx.schedule

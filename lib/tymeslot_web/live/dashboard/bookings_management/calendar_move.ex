@@ -58,7 +58,7 @@ defmodule TymeslotWeb.Dashboard.BookingsManagement.CalendarMove do
   def confirm(socket, reload) when is_function(reload, 1) do
     user_id = socket.assigns.current_user.id
 
-    case RateLimiter.check_dashboard_reschedule_rate_limit(user_id) do
+    case RateLimiter.check(:dashboard_reschedule, user_id) do
       {:error, :rate_limited, message} ->
         Flash.error(message)
         socket

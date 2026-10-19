@@ -1,7 +1,7 @@
 defmodule Tymeslot.Emails.Templates.CalendarSyncErrorTravelTest do
   @moduledoc """
   Drives `CalendarSyncError.owner_start_time/1` (private) through its real
-  entry point, `CalendarSyncError.render_both/2`. Like
+  entry point, `CalendarSyncError.render/2`. Like
   `ExternalBookingChange`, this template prints only a formatted local time,
   no raw zone name, so the assertions read the resolved zone back out of the
   rendered hour (12h/AM-PM for the "en" locale this email always renders in).
@@ -41,7 +41,7 @@ defmodule Tymeslot.Emails.Templates.CalendarSyncErrorTravelTest do
     %{user: profile.user}
   end
 
-  describe "owner_start_time/1 via CalendarSyncError.render_both/2" do
+  describe "the host's zone in CalendarSyncError.render/2" do
     test "a meeting during a trip shows the host the trip's zone", %{user: user} do
       meeting =
         insert(:meeting,
@@ -50,12 +50,12 @@ defmodule Tymeslot.Emails.Templates.CalendarSyncErrorTravelTest do
           end_time: ~U[2027-03-17 15:00:00Z]
         )
 
-      {_html, text} = CalendarSyncError.render_both(meeting, :network_error)
+      %{text_body: text} = CalendarSyncError.render(meeting, :network_error)
 
-      # 14:00 UTC is 03:00 PM in Europe/Berlin (CET on this date) and
+      # 14:00 UTC is 3:00 PM in Europe/Berlin (CET on this date) and
       # 10:00 AM in America/New_York (EDT). Fails if the resolver stops
       # asking `Travel` for the trip in effect on the meeting's date.
-      assert text =~ "03:00 PM"
+      assert text =~ "3:00 PM"
       refute text =~ "10:00 AM"
     end
 
@@ -67,7 +67,7 @@ defmodule Tymeslot.Emails.Templates.CalendarSyncErrorTravelTest do
           end_time: ~U[2027-04-07 15:00:00Z]
         )
 
-      {_html, text} = CalendarSyncError.render_both(meeting, :network_error)
+      %{text_body: text} = CalendarSyncError.render(meeting, :network_error)
 
       assert text =~ "10:00 AM"
       refute text =~ "04:00 PM"
