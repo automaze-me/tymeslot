@@ -44,8 +44,8 @@ defmodule Tymeslot.Meetings.CalendarMove do
   alias Tymeslot.Jobs
   alias Tymeslot.Meetings.CalendarEventLink
   alias Tymeslot.Meetings.MeetingQueries
-  alias Tymeslot.Meetings.MeetingState
   alias Tymeslot.Meetings.MeetingSchema
+  alias Tymeslot.Meetings.MeetingState
   alias Tymeslot.Workers.CalendarEventWorker
 
   @externally_modified "externally_modified"
