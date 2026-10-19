@@ -28,6 +28,7 @@ defmodule TymeslotWeb.Components.Dashboard.Meetings.MeetingCard do
   attr :cancelling_meeting, :any, required: false
   attr :sending_reschedule, :any, required: false
   attr :answering_request, :any, default: nil
+  attr :move_offer, :map, default: nil
   attr :target, :any, required: true
 
   @spec meeting_card(map()) :: Phoenix.LiveView.Rendered.t()
@@ -51,6 +52,9 @@ defmodule TymeslotWeb.Components.Dashboard.Meetings.MeetingCard do
             is_nil(@meeting.calendar_sync_status_dismissed_at)
         }
         meeting={@meeting}
+        move_offer={@move_offer}
+        timezone={@timezone}
+        time_format={@time_format}
         target={@target}
       />
       <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
@@ -255,6 +259,9 @@ defmodule TymeslotWeb.Components.Dashboard.Meetings.MeetingCard do
   end
 
   attr :meeting, :map, required: true
+  attr :move_offer, :map, default: nil
+  attr :timezone, :string, required: true
+  attr :time_format, :string, required: true
   attr :target, :any, required: true
 
   defp calendar_sync_banner(assigns) do
@@ -280,16 +287,29 @@ defmodule TymeslotWeb.Components.Dashboard.Meetings.MeetingCard do
           )}
         </span>
       </p>
-      <Buttons.action_button
-        variant={:outline}
-        size={:sm}
-        phx-click="dismiss_calendar_sync_banner"
-        phx-value-id={@meeting.id}
-        phx-target={@target}
-        class="shrink-0"
-      >
-        {dgettext("dashboard_bookings", "Dismiss")}
-      </Buttons.action_button>
+      <div class="flex flex-wrap justify-end gap-2 shrink-0">
+        <Buttons.action_button
+          :if={@move_offer}
+          variant={:primary}
+          size={:sm}
+          phx-click="show_calendar_move_modal"
+          phx-value-id={@meeting.id}
+          phx-target={@target}
+        >
+          {dgettext("dashboard_bookings", "Move booking to %{time}",
+            time: Helpers.format_move_time(@move_offer, @timezone, @time_format)
+          )}
+        </Buttons.action_button>
+        <Buttons.action_button
+          variant={:outline}
+          size={:sm}
+          phx-click="dismiss_calendar_sync_banner"
+          phx-value-id={@meeting.id}
+          phx-target={@target}
+        >
+          {dgettext("dashboard_bookings", "Dismiss")}
+        </Buttons.action_button>
+      </div>
     </div>
     """
   end
