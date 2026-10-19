@@ -267,7 +267,7 @@ defmodule TymeslotWeb.Components.Dashboard.Meetings.MeetingCard do
   defp calendar_sync_banner(assigns) do
     ~H"""
     <div class={[
-      "flex items-start justify-between gap-4 rounded-token-2xl px-5 py-4 mb-6 border-2",
+      "flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-token-2xl px-5 py-4 mb-6 border-2",
       if(@meeting.calendar_sync_status == "externally_deleted",
         do: "bg-red-50 border-red-200 text-red-800",
         else: "bg-amber-50 border-amber-200 text-amber-800"
@@ -287,11 +287,12 @@ defmodule TymeslotWeb.Components.Dashboard.Meetings.MeetingCard do
           )}
         </span>
       </p>
-      <div class="flex flex-wrap justify-end gap-2 shrink-0">
+      <div class="flex flex-wrap sm:justify-end gap-2 sm:shrink-0">
         <Buttons.action_button
           :if={@move_offer}
           variant={:primary}
           size={:sm}
+          class="whitespace-normal"
           phx-click="show_calendar_move_modal"
           phx-value-id={@meeting.id}
           phx-target={@target}
