@@ -1,6 +1,6 @@
 # Move a booking to the time its calendar event was moved to
 
-**Status:** design, approved 2026-10-19
+**Status:** implemented on merge-upstream-1.26.0
 **Date:** 2026-10-19
 **Branch:** to be cut from `merge-upstream-1.26.0`
 **Fork:** `automaze-me/tymeslot`, written to be offered upstream as an issue
