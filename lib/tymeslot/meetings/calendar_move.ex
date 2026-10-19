@@ -5,8 +5,7 @@ defmodule Tymeslot.Meetings.CalendarMove do
   When the host drags a booked meeting to another time in their own calendar,
   sync flags the booking `"externally_modified"`. This module decides whether
   the booking can follow the event (`offer/1`), at what time, and performs the
-  move (`move/2`). See
-  `docs/superpowers/specs/2026-10-19-move-booking-to-calendar-time-design.md`.
+  move (`move/2`).
 
   The offer is a cheap, honest rule: it is made only when the cached event
   gives an unambiguous new time. Each refusal exists because following the
@@ -17,6 +16,10 @@ defmodule Tymeslot.Meetings.CalendarMove do
     cannot follow a single event.
   - `:not_confirmed` — only a confirmed booking has a time to move; an
     unapproved or cancelled one is handled by its own lifecycle.
+  - `:awaiting_new_time` — a pending reschedule request voided the slot and
+    Tymeslot deleted (or is deleting) the event on purpose, so a leftover
+    cached row is not a time the host chose; moving would clear the request
+    with no event in the calendar.
   - `:calendar_write_pending` — Tymeslot's own queued calendar write has not
     landed, so the cache may still hold the old time and the flag may be an
     echo of our own change. Offering would move the booking back.
@@ -41,6 +44,7 @@ defmodule Tymeslot.Meetings.CalendarMove do
   alias Tymeslot.Jobs
   alias Tymeslot.Meetings.CalendarEventLink
   alias Tymeslot.Meetings.MeetingQueries
+  alias Tymeslot.Meetings.MeetingState
   alias Tymeslot.Meetings.MeetingSchema
   alias Tymeslot.Workers.CalendarEventWorker
 
@@ -51,6 +55,7 @@ defmodule Tymeslot.Meetings.CalendarMove do
           :not_flagged
           | :group_meeting
           | :not_confirmed
+          | :awaiting_new_time
           | :calendar_write_pending
           | :event_not_found
           | :all_day
@@ -105,6 +110,7 @@ defmodule Tymeslot.Meetings.CalendarMove do
       meeting.calendar_sync_status_dismissed_at != nil -> {:error, :not_flagged}
       MeetingSchema.group?(meeting) -> {:error, :group_meeting}
       meeting.status != "confirmed" -> {:error, :not_confirmed}
+      not MeetingState.expects_calendar_event?(meeting) -> {:error, :awaiting_new_time}
       true -> :ok
     end
   end

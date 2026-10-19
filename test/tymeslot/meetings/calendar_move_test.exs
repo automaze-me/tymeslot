@@ -99,6 +99,11 @@ defmodule Tymeslot.Meetings.CalendarMoveTest do
       assert CalendarMove.offer(meeting) == {:error, :not_confirmed}
     end
 
+    test "a meeting awaiting a new time after a reschedule request", %{meeting: meeting} do
+      meeting = change_meeting(meeting, reschedule_requested_at: DateTime.utc_now(:second))
+      assert CalendarMove.offer(meeting) == {:error, :awaiting_new_time}
+    end
+
     test "while Tymeslot's own calendar write is pending", %{meeting: meeting} do
       {:ok, _job} = CalendarJobs.schedule_job(meeting, "update")
       assert CalendarMove.offer(meeting) == {:error, :calendar_write_pending}
@@ -181,6 +186,26 @@ defmodule Tymeslot.Meetings.CalendarMoveTest do
     test "a second move is refused", %{user: user, meeting: meeting} do
       assert {:ok, _moved} = CalendarMove.move(meeting.id, user.id)
       assert CalendarMove.move(meeting.id, user.id) == {:error, :not_flagged}
+    end
+
+    test "a move onto another confirmed booking's start is refused", %{
+      user: user,
+      integration: integration,
+      meeting: meeting,
+      event: event
+    } do
+      insert_meeting(user, integration, "evt-other",
+        calendar_sync_status: nil,
+        start_time: DateTime.truncate(event.start_at, :second),
+        end_time: DateTime.truncate(event.end_at, :second)
+      )
+
+      assert CalendarMove.move(meeting.id, user.id) == {:error, :failed_to_update_meeting}
+
+      {:ok, unchanged} = MeetingQueries.get_meeting(meeting.id)
+      assert unchanged.start_time == meeting.start_time
+      assert unchanged.end_time == meeting.end_time
+      assert unchanged.calendar_sync_status == "externally_modified"
     end
 
     test "refuses another organiser's meeting", %{meeting: meeting} do
