@@ -141,15 +141,8 @@ defmodule Tymeslot.Integrations.Calendar.Outlook.DeltaSync do
     # payload-level `tymeslot_origin?/1` check cannot recognise, so without
     # this the delta sweep cached every one of them as server-owned.
     with {:ok, _count} <- Sync.upsert_cache(integration, calendar_events),
+         :ok <- reconcile_and_announce(integration, calendar_events, removed_uids),
          :ok <- persist_delta_link(integration, new_delta_link) do
-      # The post-commit work the webhook path gets through
-      # `Sync.persist_normalised_events/2`: fresh availability, the cache
-      # broadcast, and the reconciliation of every linked meeting whose time
-      # moved. Broadcasting alone left a booking moved in Outlook unnoticed
-      # whenever this sweep saw the change first, which for an integration
-      # without a Graph subscription is every time.
-      Sync.post_commit_reconciliation(integration, calendar_events)
-      announce_removed(integration, removed_uids)
       :ok
     else
       {:error, reason} ->
@@ -162,6 +155,23 @@ defmodule Tymeslot.Integrations.Calendar.Outlook.DeltaSync do
         # for the next sweep, so it stays alertable.
         {:error, :hard}
     end
+  end
+
+  # The post-commit work the webhook path gets through
+  # `Sync.persist_normalised_events/2`: fresh availability, the cache
+  # broadcast, and the reconciliation of every linked meeting whose time
+  # moved. Broadcasting alone left a booking moved in Outlook unnoticed
+  # whenever this sweep saw the change first, which for an integration
+  # without a Graph subscription is every time.
+  #
+  # It runs before the delta link is persisted: a crash in it leaves the link
+  # where it was, so the next sweep receives the same changes again and
+  # re-applies them (the cache upsert and the reconciliation are idempotent)
+  # rather than skipping the reconciliation for good.
+  defp reconcile_and_announce(integration, calendar_events, removed_uids) do
+    Sync.post_commit_reconciliation(integration, calendar_events)
+    announce_removed(integration, removed_uids)
+    :ok
   end
 
   defp process_removed(removed, integration) do
