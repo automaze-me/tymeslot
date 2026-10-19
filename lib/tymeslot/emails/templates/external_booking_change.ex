@@ -269,7 +269,9 @@ defmodule Tymeslot.Emails.Templates.ExternalBookingChange do
         "A group meeting cannot be moved for everyone at once. To keep the original time, move the event back in your calendar. To change it, send the participants a reschedule request from your dashboard, or cancel the meeting there so every participant is notified."
       )
     else
-      meeting |> modified_explanation_html() |> HtmlSanitizeEx.strip_tags()
+      # Only the copy's own <strong> tags are removed: strip_tags/1 would
+      # entity-encode apostrophes, which plain text does not decode.
+      meeting |> modified_explanation_html() |> String.replace(~r{</?strong>}, "")
     end
   end
 

@@ -82,6 +82,17 @@ defmodule Tymeslot.Emails.ExternalBookingChangeTest do
       refute email.text_body =~ "<strong>"
     end
 
+    test "the text body of a rescheduled one-to-one meeting keeps apostrophes unencoded" do
+      host = insert(:user, locale: "it")
+      meeting = build_meeting(%{organizer_user_id: host.id})
+
+      email = ExternalBookingChange.render(meeting, "john@example.com", :modified, "UTC")
+
+      assert email.text_body =~ "l'orario"
+      refute email.text_body =~ "&#"
+      refute email.text_body =~ "<strong>"
+    end
+
     test "a rescheduled group meeting keeps its own wording" do
       meeting = build_meeting(%{capacity: 5, attendee_name: nil, attendee_email: nil})
 
