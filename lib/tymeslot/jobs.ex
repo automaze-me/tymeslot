@@ -75,6 +75,13 @@ defmodule Tymeslot.Jobs do
   defdelegate delete_meeting_jobs(worker_module, meeting_id), to: ObanJobQueries
 
   @doc """
+  Whether a job of `worker` for one meeting has not finished yet: it is queued,
+  scheduled, running, waiting to retry or suspended. Lets a caller tell that a
+  write the worker was queued to make has yet to land.
+  """
+  defdelegate pending_meeting_job?(worker, meeting_id), to: ObanJobQueries
+
+  @doc """
   Queues holding jobs older than `recent_cutoff`, with their depth.
   """
   defdelegate list_accumulated_jobs(recent_cutoff), to: ObanJobQueries
