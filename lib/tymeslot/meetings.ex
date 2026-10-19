@@ -18,6 +18,7 @@ defmodule Tymeslot.Meetings do
     CalendarEventLink,
     CalendarEvents,
     CalendarExport,
+    CalendarMove,
     Cancellation,
     ExternalCalendarChanges,
     Guests,
@@ -427,6 +428,32 @@ defmodule Tymeslot.Meetings do
   def dismiss_calendar_sync_status(meeting_id, user_id) do
     MeetingCalendarQueries.dismiss_calendar_sync_status(meeting_id, user_id)
   end
+
+  @doc """
+  The time `meeting` can follow its moved calendar event to, or why it cannot.
+  See `Tymeslot.Meetings.CalendarMove.offer/1`.
+  """
+  @spec calendar_move_offer(MeetingSchema.t()) ::
+          {:ok, CalendarMove.offer()} | {:error, CalendarMove.refusal()}
+  defdelegate calendar_move_offer(meeting), to: CalendarMove, as: :offer
+
+  @doc """
+  The calendar-move offers for the movable meetings among `meetings`, keyed by
+  meeting id. See `Tymeslot.Meetings.CalendarMove.offers/1`.
+  """
+  @spec calendar_move_offers([MeetingSchema.t()]) :: %{String.t() => CalendarMove.offer()}
+  defdelegate calendar_move_offers(meetings), to: CalendarMove, as: :offers
+
+  @doc """
+  Moves the organiser's booking to its calendar event's current time. See
+  `Tymeslot.Meetings.CalendarMove.move/2`.
+  """
+  @spec move_to_calendar_time(String.t(), integer()) ::
+          {:ok, MeetingSchema.t()}
+          | {:error, CalendarMove.refusal() | :not_found | :failed_to_update_meeting}
+  defdelegate move_to_calendar_time(meeting_id, organizer_user_id),
+    to: CalendarMove,
+    as: :move
 
   @doc """
   Applies an externally detected calendar change (`:deleted` or `:modified`)
