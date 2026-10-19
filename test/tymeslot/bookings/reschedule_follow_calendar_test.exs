@@ -165,7 +165,7 @@ defmodule Tymeslot.Bookings.RescheduleFollowCalendarTest do
       {:ok, guest} =
         GuestQueries.insert_guest(%{meeting_id: meeting.id, email: "guest@example.com"})
 
-      {:ok, _} = GuestQueries.update_rsvp(guest, %{status: "accepted"})
+      {:ok, _rsvp} = GuestQueries.update_rsvp(guest, %{status: "accepted"})
 
       assert {:ok, _updated} = Reschedule.follow_calendar(meeting, new_start, new_end)
 

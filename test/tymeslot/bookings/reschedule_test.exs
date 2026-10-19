@@ -9,11 +9,13 @@ defmodule Tymeslot.Bookings.RescheduleTest do
 
   import Mox
 
+  alias Ecto.Changeset
   alias Tymeslot.Bookings.Reschedule
   alias Tymeslot.Bookings.RescheduleRequest
   alias Tymeslot.Bookings.Validation
   alias Tymeslot.Emails.EmailScheduler
   alias Tymeslot.Meetings.MeetingQueries
+  alias Tymeslot.Repo
   alias Tymeslot.TestMocks
   alias Tymeslot.Workers.EmailWorker
   alias Tymeslot.Workers.EmailWorkerHandlers
@@ -66,11 +68,11 @@ defmodule Tymeslot.Bookings.RescheduleTest do
       %{meeting: meeting, new_params: new_params} = setup_reschedule_test()
 
       meeting
-      |> Ecto.Changeset.change(
+      |> Changeset.change(
         calendar_sync_status: "externally_modified",
-        calendar_sync_status_dismissed_at: DateTime.truncate(DateTime.utc_now(), :second)
+        calendar_sync_status_dismissed_at: DateTime.utc_now(:second)
       )
-      |> Tymeslot.Repo.update!()
+      |> Repo.update!()
 
       assert {:ok, updated_meeting} =
                Reschedule.execute(meeting.uid, new_params, %{}, meeting.organizer_user_id)
