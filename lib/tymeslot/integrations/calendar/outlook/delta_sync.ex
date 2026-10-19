@@ -142,8 +142,14 @@ defmodule Tymeslot.Integrations.Calendar.Outlook.DeltaSync do
     # this the delta sweep cached every one of them as server-owned.
     with {:ok, _count} <- Sync.upsert_cache(integration, calendar_events),
          :ok <- persist_delta_link(integration, new_delta_link) do
-      uids = Enum.map(calendar_events, & &1.uid) ++ removed_uids
-      SyncBroadcast.broadcast_cache_update(integration.user_id, uids)
+      # The post-commit work the webhook path gets through
+      # `Sync.persist_normalised_events/2`: fresh availability, the cache
+      # broadcast, and the reconciliation of every linked meeting whose time
+      # moved. Broadcasting alone left a booking moved in Outlook unnoticed
+      # whenever this sweep saw the change first, which for an integration
+      # without a Graph subscription is every time.
+      Sync.post_commit_reconciliation(integration, calendar_events)
+      announce_removed(integration, removed_uids)
       :ok
     else
       {:error, reason} ->
@@ -167,6 +173,15 @@ defmodule Tymeslot.Integrations.Calendar.Outlook.DeltaSync do
     Sync.reconcile_deletions(integration, refs)
 
     Enum.map(refs, fn ref -> ref.uid || ref.provider_event_id end)
+  end
+
+  # `Sync.reconcile_deletions/2` has already reconciled the meetings; the
+  # freed times still have to reach availability and the open grids.
+  defp announce_removed(_integration, []), do: :ok
+
+  defp announce_removed(integration, removed_uids) do
+    Sync.invalidate_cache_for_user(integration)
+    SyncBroadcast.broadcast_cache_update(integration.user_id, removed_uids)
   end
 
   defp fetch_delta_page(token, url, accumulated, page \\ 0)
