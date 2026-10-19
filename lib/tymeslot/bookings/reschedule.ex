@@ -191,6 +191,9 @@ defmodule Tymeslot.Bookings.Reschedule do
     # this value, and nothing else has used it in the meantime. A request that
     # is declined or expires simply leaves the revision unspent, which costs
     # nothing: SEQUENCE has to rise, not to run consecutively.
+    #
+    # An external-change flag, and the host's dismissal of it, described the
+    # old time, so the new time starts without either.
     attrs =
       %{
         start_time: start_dt,
@@ -198,7 +201,9 @@ defmodule Tymeslot.Bookings.Reschedule do
         reschedule_requested_at: nil,
         reminders_sent: [],
         reminder_email_sent: false,
-        ical_sequence: meeting.ical_sequence + 1
+        ical_sequence: meeting.ical_sequence + 1,
+        calendar_sync_status: nil,
+        calendar_sync_status_dismissed_at: nil
       }
       |> Map.merge(gate_attributes(meeting_type, start_dt, meeting))
       |> Map.merge(VideoRooms.refreshed_join_url_attrs(meeting, start_dt))

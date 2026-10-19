@@ -19,9 +19,11 @@ defmodule Tymeslot.Meetings.ExternalCalendarChanges do
 
   alias Tymeslot.Bookings.Cancel
   alias Tymeslot.Emails.EmailService
+  alias Tymeslot.Jobs
   alias Tymeslot.Meetings.MeetingCalendarQueries
   alias Tymeslot.Meetings.MeetingSchema, as: Meeting
   alias Tymeslot.Meetings.MeetingState
+  alias Tymeslot.Workers.CalendarEventWorker
 
   @type signal :: :deleted | :modified
 
@@ -153,6 +155,16 @@ defmodule Tymeslot.Meetings.ExternalCalendarChanges do
 
       slot_elapsed?(meeting) ->
         ignore(meeting, signal, "meeting slot has already elapsed")
+
+      # The sync can see the event before Tymeslot's own write to it lands: an
+      # attendee reschedule moves the booking at once and a CalendarEventWorker
+      # job updates the calendar a few seconds later, so until then the event
+      # still shows the old time. Flagging it would offer the host a move back
+      # to that old time, i.e. an undo of the attendee's reschedule. Once the
+      # job is done the event is compared against the meeting as usual.
+      # Deletions stay unguarded: a removed event is gone whatever is queued.
+      signal == :modified and Jobs.pending_meeting_job?(CalendarEventWorker, meeting.id) ->
+        ignore(meeting, signal, "a Tymeslot calendar write for the meeting is still pending")
 
       true ->
         update_calendar_sync_status(meeting, new_status, signal)

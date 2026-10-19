@@ -62,6 +62,23 @@ defmodule Tymeslot.Bookings.RescheduleTest do
       refute DateTime.compare(updated_meeting.start_time, meeting.start_time) == :eq
     end
 
+    test "a reschedule clears an external-change flag" do
+      %{meeting: meeting, new_params: new_params} = setup_reschedule_test()
+
+      meeting
+      |> Ecto.Changeset.change(
+        calendar_sync_status: "externally_modified",
+        calendar_sync_status_dismissed_at: DateTime.truncate(DateTime.utc_now(), :second)
+      )
+      |> Tymeslot.Repo.update!()
+
+      assert {:ok, updated_meeting} =
+               Reschedule.execute(meeting.uid, new_params, %{}, meeting.organizer_user_id)
+
+      assert updated_meeting.calendar_sync_status == nil
+      assert updated_meeting.calendar_sync_status_dismissed_at == nil
+    end
+
     test "updates meeting times correctly" do
       %{meeting: meeting, new_params: new_params} = setup_reschedule_test()
 
