@@ -236,7 +236,7 @@ defmodule TymeslotWeb.Dashboard.BookingsManagementComponent do
   end
 
   def handle_event("show_calendar_move_modal", params, socket),
-    do: {:noreply, CalendarMove.show(socket, params)}
+    do: {:noreply, CalendarMove.show(socket, params, &load_meetings/1)}
 
   def handle_event("hide_calendar_move_modal", _params, socket),
     do: {:noreply, ModalHook.hide_modal(socket, :calendar_move)}

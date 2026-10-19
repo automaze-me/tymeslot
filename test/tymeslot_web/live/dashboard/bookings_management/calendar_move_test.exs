@@ -16,6 +16,7 @@ defmodule TymeslotWeb.Dashboard.BookingsManagement.CalendarMoveTest do
 
   alias Ecto.Changeset
   alias Plug.Test
+  alias Tymeslot.Bookings.CalendarJobs
   alias Tymeslot.Meetings.MeetingQueries
   alias Tymeslot.Repo
   alias Tymeslot.TestMocks
@@ -106,6 +107,46 @@ defmodule TymeslotWeb.Dashboard.BookingsManagement.CalendarMoveTest do
     assert moved.calendar_sync_status == nil
     refute has_element?(view, "[phx-click=show_calendar_move_modal]")
     refute render(view) =~ "rescheduled in your external calendar"
+  end
+
+  test "a confirm refused after the modal opened says why and leaves the booking", %{
+    conn: conn,
+    meeting: meeting
+  } do
+    {:ok, view, _html} = live(conn, ~p"/dashboard/meetings")
+
+    view |> element("[phx-click=show_calendar_move_modal]") |> render_click()
+
+    {:ok, _job} = CalendarJobs.schedule_job(meeting, "update")
+
+    view |> element("[data-testid=confirm-calendar-move]") |> render_click()
+
+    html = render(view)
+
+    assert html =~
+             "Tymeslot is still updating your calendar for this booking. Please try again in a moment."
+
+    refute html =~ "Your calendar now has this meeting at"
+    refute has_element?(view, "[phx-click=show_calendar_move_modal]")
+
+    {:ok, unchanged} = MeetingQueries.get_meeting(meeting.id)
+    assert unchanged.start_time == meeting.start_time
+    assert unchanged.calendar_sync_status == "externally_modified"
+  end
+
+  test "a refused open refreshes the list so the stale Move button goes", %{
+    conn: conn,
+    meeting: meeting
+  } do
+    {:ok, view, _html} = live(conn, ~p"/dashboard/meetings")
+    assert has_element?(view, "[phx-click=show_calendar_move_modal]")
+
+    {:ok, _job} = CalendarJobs.schedule_job(meeting, "update")
+
+    view |> element("[phx-click=show_calendar_move_modal]") |> render_click()
+
+    assert render(view) =~ "Tymeslot is still updating your calendar"
+    refute has_element?(view, "[phx-click=show_calendar_move_modal]")
   end
 
   test "the modal shows the time the calendar has when it opens", %{

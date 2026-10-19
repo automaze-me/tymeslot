@@ -25,9 +25,13 @@ defmodule TymeslotWeb.Dashboard.BookingsManagement.CalendarMove do
   @doc """
   Opens the confirmation for the signed-in host's meeting, or says why not.
   The lookup is scoped to the host, so another organiser's id is not found.
+  A refusal also refreshes the list, since it means the card the host clicked
+  is out of date and its Move button should go.
   """
-  @spec show(Phoenix.LiveView.Socket.t(), map()) :: Phoenix.LiveView.Socket.t()
-  def show(socket, params) do
+  @spec show(Phoenix.LiveView.Socket.t(), map(), (Phoenix.LiveView.Socket.t() ->
+                                                    Phoenix.LiveView.Socket.t())) ::
+          Phoenix.LiveView.Socket.t()
+  def show(socket, params, reload) when is_function(reload, 1) do
     user_id = socket.assigns.current_user.id
 
     with {:ok, id} <- cast_id(params),
@@ -37,9 +41,9 @@ defmodule TymeslotWeb.Dashboard.BookingsManagement.CalendarMove do
       ModalHook.show_modal(socket, :calendar_move, %{meeting: meeting, offer: offer})
     else
       {:error, reason} ->
-        emit(user_id, nil, :open, reason)
+        emit(user_id, requested_id(params), :open, reason)
         Flash.error(refusal_message(reason))
-        socket
+        reload.(socket)
     end
   end
 
@@ -99,6 +103,9 @@ defmodule TymeslotWeb.Dashboard.BookingsManagement.CalendarMove do
       socket.assigns.time_format
     )
   end
+
+  defp requested_id(%{"id" => id}) when is_binary(id), do: id
+  defp requested_id(_params), do: nil
 
   defp cast_id(%{"id" => id}) when is_binary(id) do
     case UUID.cast(String.trim(id)) do
