@@ -1304,6 +1304,13 @@ msgstr "Non è possibile aggiungere altri ospiti a questa riunione."
 msgid "Too many new meetings. Please wait a moment."
 msgstr "Troppe nuove riunioni. Attendi un momento."
 
+#: lib/tymeslot_web/live/dashboard/calendar_grid/modals/create_event_modal.ex
+#, elixir-autogen, elixir-format
+msgid "Add up to %{count} reminder email for this meeting. The guest and anyone else invited receive it."
+msgid_plural "Add up to %{count} reminder emails for this meeting. The guest and anyone else invited receive it."
+msgstr[0] "Aggiungi fino a %{count} email di promemoria per questa riunione. La riceveranno l’ospite e tutti gli altri invitati."
+msgstr[1] "Aggiungi fino a %{count} email di promemoria per questa riunione. Le riceveranno l’ospite e tutti gli altri invitati."
+
 #: lib/tymeslot_web/live/dashboard/calendar_grid/edit_workflow.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else organises this meeting, so Tymeslot can't move or split a series you were only invited to."
@@ -1483,3 +1490,15 @@ msgstr "Invia l'annullamento"
 #, elixir-autogen, elixir-format
 msgid "You already have a meeting at this time. Please choose a different time."
 msgstr "Hai già una riunione a quest'ora. Scegli un altro orario."
+
+#: lib/tymeslot_web/live/dashboard/calendar_grid/event_handlers/ics_import.ex
+#, elixir-autogen, elixir-format
+msgid "1 of them repeats on a day some months don't have, which Outlook would move to the month's last day."
+msgid_plural "%{count} of them repeat on a day some months don't have, which Outlook would move to the month's last day."
+msgstr[0] "1 si ripete in un giorno che alcuni mesi non hanno e Outlook lo sposterebbe all’ultimo giorno del mese."
+msgstr[1] "%{count} si ripetono in un giorno che alcuni mesi non hanno e Outlook li sposterebbe all’ultimo giorno del mese."
+
+#: lib/tymeslot_web/live/dashboard/calendar_grid/edit_workflow.ex
+#, elixir-autogen, elixir-format
+msgid "Outlook can't skip the months that don't have this series' day, and would move those events to the month's last day. Please start the series on the 28th or earlier, or save it to another calendar."
+msgstr "Outlook non può saltare i mesi che non hanno il giorno di questa serie e sposterebbe quegli eventi all’ultimo giorno del mese. Fai iniziare la serie il 28 o prima, oppure salvala in un altro calendario."

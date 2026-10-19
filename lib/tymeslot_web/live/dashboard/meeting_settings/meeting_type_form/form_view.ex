@@ -56,14 +56,20 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm.FormView do
   import PaymentsSection, only: [payments_section: 1]
   import VisibilitySection, only: [visibility_section: 1]
   import TymeslotWeb.Dashboard.MeetingSettings.Components.BookingComponents
-  import TymeslotWeb.Dashboard.MeetingSettings.Components.Reminders
+  import TymeslotWeb.Components.Shared.ReminderPicker, only: [reminder_picker: 1]
 
   # Which form-error fields surface an indicator on which tab. Errors on
   # fields absent here (e.g. :base) render below the panels and need no dot.
   @tab_error_fields %{
     "details" => [:name, :duration, :slot_interval, :description, :icon],
     "location" => [:locations, :video_integration, :calendar_integration, :target_calendar],
-    "booking" => [:payment_required, :price_cents, :max_participants, :approval_window_hours],
+    "booking" => [
+      :payment_required,
+      :price_cents,
+      :max_participants,
+      :last_spots_threshold,
+      :approval_window_hours
+    ],
     "reminders" => [:reminder_config]
   }
 
@@ -313,6 +319,8 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm.FormView do
           <.group_bookings_section
             group_bookings_enabled={@group_bookings_enabled}
             max_participants={@max_participants}
+            show_seat_availability={@show_seat_availability}
+            last_spots_threshold={@last_spots_threshold}
             payment_required={@payment_required}
             blocker={
               GroupRules.enable_blocker(%{
@@ -355,7 +363,11 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm.FormView do
             myself={@myself}
           />
 
-          <.limits_section booking_limits={@booking_limits} myself={@myself} />
+          <.limits_section
+            booking_limits={@booking_limits}
+            week_start={@week_start}
+            myself={@myself}
+          />
 
           <.visibility_section
             type={@type}
@@ -392,7 +404,7 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm.FormView do
           hidden={@active_tab != "reminders"}
           class={panel_class(@active_tab, "reminders")}
         >
-          <.reminders_section
+          <.reminder_picker
             reminders={@reminders}
             max_reminders={@max_reminders}
             new_reminder_value={@new_reminder_value}
@@ -400,7 +412,19 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm.FormView do
             reminder_error={@reminder_error}
             show_custom_reminder={@show_custom_reminder}
             reminder_confirmation={@reminder_confirmation}
-            form_errors={@form_errors}
+            description={
+              dngettext(
+                "dashboard_meeting_form",
+                "Add up to %{count} reminder email for this meeting type. We recommend using only one.",
+                "Add up to %{count} reminder emails for this meeting type. We recommend using only one.",
+                @max_reminders
+              )
+            }
+            extra_errors={
+              @form_errors
+              |> FormValidationHelpers.field_errors(:reminder_config)
+              |> Enum.map(&Helpers.format_errors/1)
+            }
             myself={@myself}
           />
         </.card>

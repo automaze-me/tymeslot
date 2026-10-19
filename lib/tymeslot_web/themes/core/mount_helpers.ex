@@ -13,11 +13,9 @@ defmodule TymeslotWeb.Themes.Core.MountHelpers do
   alias Phoenix.LiveView
   alias Tymeslot.BookingPages
   alias Tymeslot.Polls
-  alias Tymeslot.Profiles
   alias Tymeslot.Scheduling.LinkAccessPolicy
-  alias Tymeslot.Timezones
   alias TymeslotWeb.Live.Scheduling.OrganizerHelpers
-  alias TymeslotWeb.Themes.Core.{Context, MeetingManagement, PollVoting, Registry}
+  alias TymeslotWeb.Themes.Core.{Context, ErrorBoundary, MeetingManagement, PollVoting, Registry}
   alias TymeslotWeb.Themes.Shared.Customization.Helpers, as: ThemeCustomizationHelpers
 
   @doc """
@@ -67,7 +65,7 @@ defmodule TymeslotWeb.Themes.Core.MountHelpers do
           delegate_fn.(context.theme_id, :mount, [params, session, socket])
 
         nil ->
-          {:ok, assign(socket, :error, :theme_context_unavailable)}
+          {:ok, assign(socket, :error, ErrorBoundary.load_failed_message())}
       end
     end
   end
@@ -104,16 +102,12 @@ defmodule TymeslotWeb.Themes.Core.MountHelpers do
         # A booking made through a booking page is managed in that page's look.
         profile = BookingPages.for_meeting(profile, meeting)
 
-        theme_id =
-          profile.booking_theme || socket.assigns[:theme_id] || Registry.default_theme_id()
-
         socket =
           setup_meeting_management_socket(
             socket,
             profile,
             meeting,
             meeting_uid,
-            theme_id,
             action,
             params
           )
@@ -156,25 +150,6 @@ defmodule TymeslotWeb.Themes.Core.MountHelpers do
     end
   end
 
-  @doc "Assigns the validated user timezone from params or socket assigns."
-  @spec assign_user_timezone(Phoenix.LiveView.Socket.t(), map()) :: Phoenix.LiveView.Socket.t()
-  def assign_user_timezone(socket, params) do
-    timezone =
-      params["timezone"] || socket.assigns[:user_timezone] ||
-        Profiles.get_default_timezone()
-
-    normalized_timezone = Timezones.normalize(timezone)
-
-    validated_timezone =
-      if Timezones.valid?(normalized_timezone) do
-        normalized_timezone
-      else
-        Profiles.get_default_timezone()
-      end
-
-    assign(socket, :user_timezone, validated_timezone)
-  end
-
   # Builds the theme context from params and profile, assigns it to the socket.
   @spec prepare_theme_context(map(), map(), Phoenix.LiveView.Socket.t()) ::
           {:ok, Context.t(), Phoenix.LiveView.Socket.t()} | {:error, Phoenix.LiveView.Socket.t()}
@@ -189,7 +164,7 @@ defmodule TymeslotWeb.Themes.Core.MountHelpers do
         {:ok, context, socket}
 
       nil ->
-        {:error, assign(socket, :error, :theme_context_unavailable)}
+        {:error, assign(socket, :error, ErrorBoundary.load_failed_message())}
     end
   end
 
@@ -239,13 +214,11 @@ defmodule TymeslotWeb.Themes.Core.MountHelpers do
          profile,
          meeting,
          meeting_uid,
-         theme_id,
          action,
          params
        ) do
     socket =
       socket
-      |> assign(:theme_id, theme_id)
       |> assign(:organizer_profile, profile)
       |> assign(:booking_window_days, OrganizerHelpers.booking_window_days(profile))
       |> assign(:meeting, meeting)
@@ -253,10 +226,17 @@ defmodule TymeslotWeb.Themes.Core.MountHelpers do
       |> assign(:loading, false)
       |> assign(:has_theme, true)
 
-    socket =
+    # The booking pages' resolution: `?theme=`, then the organiser's theme,
+    # each only when the catalogue knows it, then the default. The page, its
+    # stylesheet and its customisation all follow the one answer.
+    {socket, theme_id} =
       case Context.from_params(params, profile) do
-        %Context{} = context -> Context.assign_to_socket(socket, context)
-        nil -> socket
+        %Context{} = context ->
+          {Context.assign_to_socket(socket, context), context.theme_id}
+
+        nil ->
+          theme_id = Registry.default_theme_id()
+          {assign(socket, :theme_id, theme_id), theme_id}
       end
 
     socket = MeetingManagement.assign_action_specific_data(socket, action, meeting, params)

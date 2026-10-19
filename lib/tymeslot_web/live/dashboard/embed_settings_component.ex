@@ -12,6 +12,7 @@ defmodule TymeslotWeb.Live.Dashboard.EmbedSettingsComponent do
   alias Tymeslot.Profiles
   alias Tymeslot.Scheduling.LinkAccessPolicy
   alias Tymeslot.Security.RateLimiter
+  alias Tymeslot.Themes.Catalog
   alias Tymeslot.Utils.UrlBuilder
   alias TymeslotWeb.Components.CoreComponents.Navigation
   alias TymeslotWeb.Endpoint
@@ -339,7 +340,7 @@ defmodule TymeslotWeb.Live.Dashboard.EmbedSettingsComponent do
 
     socket
     |> assign(:username, address)
-    |> assign(:theme_id, shown.booking_theme || "1")
+    |> assign(:theme_id, shown.booking_theme || Catalog.default_id())
     |> assign(:booking_url, UrlBuilder.booking_url(address))
   end
 

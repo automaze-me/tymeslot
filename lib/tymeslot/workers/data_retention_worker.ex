@@ -12,11 +12,14 @@ defmodule Tymeslot.Workers.DataRetentionWorker do
   6. Hourly calendar availability refusal counters (30 days retention)
   7. Abandoned Telegram setup stubs (own minute-scale TTL, not a day count)
   8. Analytics visitor-hash salts (each kept only for its own UTC day)
-  9. Accounts still unverified 30 days after sign-up, with the email address
-     and sign-up IP they hold
+  9. Abandoned sign-ups: password accounts still unverified 30 days after
+     sign-up that never had a session, never finished onboarding and are not
+     admins, with the email address and sign-up IP they hold
   10. Financial records past their statutory retention period (years, counted
       from the end of the financial year; see
       `Tymeslot.MeetingPayments.DataRetention`)
+  11. What invitees gave on meetings and polls that ended two years ago,
+      anonymised rather than deleted (see `Tymeslot.InviteeData`)
 
   Ensures the database doesn't grow indefinitely by removing
   old records based on configured retention periods.
@@ -33,6 +36,7 @@ defmodule Tymeslot.Workers.DataRetentionWorker do
   alias Tymeslot.Auth
   alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Integrations.HealthCheck.AvailabilityRefusalQueries
+  alias Tymeslot.InviteeData
   alias Tymeslot.MeetingPayments.DataRetention
   alias Tymeslot.Slack
   alias Tymeslot.Telegram
@@ -95,6 +99,13 @@ defmodule Tymeslot.Workers.DataRetentionWorker do
       config_key: :unverified_account_days,
       default_days: 30,
       prune: {Auth, :purge_unverified_accounts}
+    },
+    %{
+      name: "invitee data",
+      args_key: "invitee_data_retention_days",
+      config_key: :invitee_data_days,
+      default_days: 730,
+      prune: {InviteeData, :anonymise_expired}
     }
   ]
 

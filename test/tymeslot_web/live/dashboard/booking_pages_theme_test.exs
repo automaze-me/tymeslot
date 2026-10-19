@@ -104,10 +104,13 @@ defmodule TymeslotWeb.Dashboard.BookingPagesThemeTest do
     assert render(view) =~ "/einfachiso"
 
     view
-    |> element("[phx-click='theme:select_color_scheme'][phx-value-scheme='purple']")
+    |> element(
+      "[phx-click='theme:set_option'][phx-value-option='palette']" <>
+        "[phx-value-field='scheme'][phx-value-choice='purple']"
+    )
     |> render_click()
 
-    assert %{color_scheme: "purple"} =
+    assert %{settings: %{"color_scheme" => "purple"}} =
              ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, ctx.page.id}, "1")
 
     assert ThemeCustomizations.get_by_profile_and_theme(ctx.profile.id, "1") == nil

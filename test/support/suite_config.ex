@@ -10,6 +10,7 @@ defmodule Tymeslot.Test.SuiteConfig do
 
   alias Oban.Job
   alias Tymeslot.Repo
+  alias Tymeslot.Test.HtmlFailureFormatter
   alias Tymeslot.Test.LogCapture
 
   # Slow/external suites are opt-in — run them explicitly with `--include`
@@ -23,7 +24,8 @@ defmodule Tymeslot.Test.SuiteConfig do
     proxy_integration: true,
     catalogue_freshness: true,
     tld_freshness: true,
-    tz_freshness: true
+    tz_freshness: true,
+    cloudron_package_freshness: true
   ]
 
   @doc """
@@ -37,8 +39,9 @@ defmodule Tymeslot.Test.SuiteConfig do
   rather than on every local run.
 
   `:tld_freshness` and `:tz_freshness` need outbound network access to IANA,
-  which a local run cannot be assumed to have and which would make the suite
-  fail offline for a reason that has nothing to do with the change under test.
+  and `:cloudron_package_freshness` to git.cloudron.io, which a local run
+  cannot be assumed to have and which would make the suite fail offline for a
+  reason that has nothing to do with the change under test.
 
   `:git_cliff` is excluded only where the binary is missing, so the changelog
   config tests run by default for anyone able to cut a release (and in the
@@ -51,6 +54,19 @@ defmodule Tymeslot.Test.SuiteConfig do
     case System.find_executable("git-cliff") do
       nil -> Keyword.put(@default_exclude_tags, :git_cliff, true)
       _found -> @default_exclude_tags
+    end
+  end
+
+  @doc """
+  The configured ExUnit formatters with `ExUnit.CLIFormatter` swapped for
+  `Tymeslot.Test.HtmlFailureFormatter`, so a failed `html =~` prints an excerpt
+  rather than the whole page. Any `--formatter` given on the command line is
+  kept.
+  """
+  @spec formatters() :: [module()]
+  def formatters do
+    for formatter <- ExUnit.configuration()[:formatters] do
+      if formatter == ExUnit.CLIFormatter, do: HtmlFailureFormatter, else: formatter
     end
   end
 

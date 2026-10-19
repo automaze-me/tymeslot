@@ -39,7 +39,7 @@ defmodule Tymeslot.BookingPages.BookingPageSchemaTest do
   end
 
   test "refuses an unknown theme" do
-    refute page_changeset(%{name: "x", slug: "fine-name", booking_theme: "99"}).valid?
+    refute page_changeset(%{name: "x", slug: "fine-name", booking_theme: "no-such-theme"}).valid?
   end
 
   test "the database refuses a second page with the same address in any case" do

@@ -93,6 +93,13 @@ defmodule Tymeslot.Validation.Constraints do
   @spec group_participants_range() :: Range.t()
   def group_participants_range, do: 2..max_participants_range().last
 
+  @doc """
+  The "last N spots" threshold of a group meeting type. A value at or above
+  the type's capacity is allowed: the count then simply always shows.
+  """
+  @spec last_spots_threshold_range() :: Range.t()
+  def last_spots_threshold_range, do: 1..max_participants_range().last
+
   @spec booking_limit_range() :: Range.t()
   def booking_limit_range, do: 1..500
 
@@ -198,6 +205,12 @@ defmodule Tymeslot.Validation.Constraints do
     [greater_than_or_equal_to: range.first, less_than_or_equal_to: range.last]
   end
 
+  @spec last_spots_threshold_opts() :: keyword()
+  def last_spots_threshold_opts do
+    range = last_spots_threshold_range()
+    [greater_than_or_equal_to: range.first, less_than_or_equal_to: range.last]
+  end
+
   @spec poll_duration_minutes_opts() :: keyword()
   def poll_duration_minutes_opts do
     range = poll_duration_minutes_range()
@@ -275,4 +288,14 @@ defmodule Tymeslot.Validation.Constraints do
 
   @spec booking_welcome_line_max_length() :: pos_integer()
   def booking_welcome_line_max_length, do: 80
+
+  # The organiser's introduction, shown by themes that present the organiser:
+  # a headline that fits one line under their name on a phone, and a bio of a
+  # few short paragraphs.
+
+  @spec profile_headline_max_length() :: pos_integer()
+  def profile_headline_max_length, do: 120
+
+  @spec profile_bio_max_length() :: pos_integer()
+  def profile_bio_max_length, do: 1000
 end

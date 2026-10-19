@@ -60,14 +60,6 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   # Query-string key carrying the schedule the page is editing.
   @schedule_param "schedule"
 
-  # Every event the travel form's markup emits, in one place so the dispatch
-  # guard below and `TravelFormHandler` cannot fall out of step.
-  @travel_form_events TravelFormHandler.events()
-
-  # Same idea for the two delete-confirmation modals' events; see
-  # `DeleteModalHandler`.
-  @delete_modal_events DeleteModalHandler.events()
-
   # Value seeded into the custom input when a field currently sitting on a
   # preset is switched into custom mode. The preset lists themselves are
   # `CustomInputModeHelper.presets/1`, the same table the card renders its tags
@@ -198,21 +190,6 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
     end)
   end
 
-  # The delete-confirmation modals' own state handling — show/hide/confirm
-  # for both a schedule and a travel period — lives in `DeleteModalHandler`,
-  # alongside `DeleteModals`' markup, rather than here: see that module's
-  # `@moduledoc` for why.
-  def handle_event(event, params, socket) when event in @delete_modal_events do
-    DeleteModalHandler.handle_event(event, params, socket)
-  end
-
-  # The travel form's own state handling — show/hide, the zone dropdown, the
-  # save — lives in `TravelFormHandler`, alongside `TravelForm`'s markup,
-  # rather than here: see that module's `@moduledoc` for why.
-  def handle_event(event, params, socket) when event in @travel_form_events do
-    TravelFormHandler.handle_event(event, params, socket)
-  end
-
   # Scheduling policy
 
   def handle_event(event, params, socket) when is_map_key(@policy_events, event) do
@@ -222,6 +199,23 @@ defmodule TymeslotWeb.Dashboard.ScheduleSettingsComponent do
   def handle_event("focus_custom_input", %{"setting" => setting}, socket)
       when is_map_key(@policy_settings, setting) do
     enable_custom_policy(socket, Map.fetch!(@policy_settings, setting))
+  end
+
+  # The delete-confirmation modals' own state handling (show/hide/confirm for
+  # both a schedule and a travel period) lives in `DeleteModalHandler`,
+  # alongside `DeleteModals`' markup, and the travel form's (show/hide, the
+  # zone dropdown, the save) in `TravelFormHandler`, alongside `TravelForm`'s:
+  # see those modules' `@moduledoc`s for why. Each names its own events, read
+  # here at runtime rather than into a guard, which would make this component
+  # a compile-time dependant of both.
+  def handle_event(event, params, socket) do
+    cond do
+      event in DeleteModalHandler.events() ->
+        DeleteModalHandler.handle_event(event, params, socket)
+
+      event in TravelFormHandler.events() ->
+        TravelFormHandler.handle_event(event, params, socket)
+    end
   end
 
   # State Management Functions

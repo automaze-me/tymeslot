@@ -27,38 +27,28 @@ defmodule Tymeslot.ThemeCustomizations.PageUploadsTest do
     %{profile: profile, page: page}
   end
 
-  defp store!(scope, filename) do
+  defp attach!(scope, filename) do
     temp = MediaFixtures.temp_copy!("gps.webp")
 
-    {:ok, path} =
-      ThemeCustomizations.store_background_image(scope, "1", %{path: temp, filename: filename})
+    {:ok, customization} =
+      ThemeCustomizations.attach_asset(scope, "1", :background_image_path, %{
+        path: temp,
+        filename: filename
+      })
 
-    path
+    customization.settings["background_image_path"]
   end
 
   test "a page's upload never replaces or deletes the profile's file of the same name", ctx do
-    profile_path = store!(ctx.profile.id, "bg.webp")
-    page_path = store!({ctx.profile.id, ctx.page.id}, "bg.webp")
+    profile_path = attach!(ctx.profile.id, "bg.webp")
+    page_path = attach!({ctx.profile.id, ctx.page.id}, "bg.webp")
 
     refute profile_path == page_path
-    assert Path.basename(page_path) =~ "page-#{ctx.page.id}-"
 
-    insert(:theme_customization,
-      profile: ctx.profile,
-      theme_id: "1",
-      background_type: "image",
-      background_value: "custom",
-      background_image_path: profile_path
-    )
+    assert %{booking_page_id: page_id} =
+             ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, ctx.page.id}, "1")
 
-    insert(:theme_customization,
-      profile: ctx.profile,
-      booking_page: ctx.page,
-      theme_id: "1",
-      background_type: "image",
-      background_value: "custom",
-      background_image_path: page_path
-    )
+    assert page_id == ctx.page.id
 
     assert :ok = ThemeCustomizations.delete_page_customizations(ctx.page.id)
 

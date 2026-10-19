@@ -8,7 +8,7 @@ defmodule Tymeslot.BookingPages.ResolutionTest do
 
   alias Tymeslot.BookingPages
   alias Tymeslot.Profiles
-  alias TymeslotWeb.Themes.Core.Context
+  alias Tymeslot.ThemeCustomizations.Presets
   alias TymeslotWeb.Themes.Shared.Customization.Helpers
 
   setup do
@@ -112,10 +112,13 @@ defmodule Tymeslot.BookingPages.ResolutionTest do
     )
 
     resolved = Profiles.get_profile_by_username("einfachiso")
-    socket = Helpers.assign_theme_customization(%Phoenix.LiveView.Socket{}, resolved, "1")
 
-    assert socket.assigns.theme_customization.color_scheme == "rose"
-    assert Context.new("1", resolved).customizations["color_scheme"] == "rose"
-    assert Context.new("1", profile).customizations["color_scheme"] == "ocean"
+    assert primary_colour(resolved) == Presets.get_color_schemes()["rose"].colors.primary
+    assert primary_colour(profile) == Presets.get_color_schemes()["ocean"].colors.primary
+  end
+
+  defp primary_colour(profile) do
+    socket = Helpers.assign_theme_customization(%Phoenix.LiveView.Socket{}, profile, "1")
+    socket.assigns.theme_tokens.vars["--theme-primary"]
   end
 end

@@ -15,6 +15,8 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm do
   alias Tymeslot.MeetingTypes
   alias Tymeslot.MeetingTypes.ApprovalWindow
   alias Tymeslot.MeetingTypes.InputValidation
+  alias Tymeslot.Validation.Constraints
+  alias TymeslotWeb.Components.Shared.ReminderPickerState
   alias TymeslotWeb.Dashboard.MeetingSettings.Helpers
 
   alias TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm.{
@@ -23,7 +25,6 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm do
     FormView,
     GroupRules,
     Init,
-    ReminderHandlers,
     SlotIntervalField,
     Validation
   }
@@ -46,52 +47,57 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm do
   @impl Phoenix.LiveComponent
   def mount(socket) do
     {:ok,
-     socket
-     |> assign(:form_errors, %{})
-     |> assign(:form_data, %{})
-     |> assign(:selected_icon, "none")
-     |> assign(:locations, [])
-     |> assign(:venues, [])
-     |> assign(:selected_calendar_integration_id, nil)
-     |> assign(:selected_target_calendar_id, nil)
-     |> assign(:selected_availability_schedule_id, nil)
-     |> assign(:schedules, [])
-     |> assign(:default_schedule_name, Schedules.default_schedule_name())
-     |> assign(:available_calendars, [])
-     |> assign(:no_writable_calendars, false)
-     |> assign(:target_calendar_status, :ok)
-     |> assign(:refreshing_calendars, false)
-     |> assign(:reminders, [])
-     |> assign(:max_reminders, MeetingTypes.max_reminders())
-     |> assign(:new_reminder_value, "")
-     |> assign(:new_reminder_unit, "minutes")
-     |> assign(:reminder_error, nil)
-     |> assign(:show_custom_reminder, false)
-     |> assign(:reminder_confirmation, nil)
-     |> assign(:custom_fields, [])
-     |> assign(:save_status, :saved)
-     |> assign(:editing_question, nil)
-     |> assign(:editing_question_mode, :add)
-     |> assign(:editing_location, nil)
-     |> assign(:editing_location_mode, :add)
-     |> assign(:custom_questions_allowed, true)
-     |> assign(:group_bookings_allowed, true)
-     |> assign(:payments_feature_enabled, false)
-     |> assign(:payments_charges_enabled, false)
-     |> assign(:payment_currency, "usd")
-     |> assign(:payment_currency_minimum_cents, 50)
-     |> assign(:payment_required, false)
-     |> assign(:payment_price, "")
-     |> assign(:allow_guests, false)
-     |> assign(:requires_approval, false)
-     |> assign(:approval_window_hours, nil)
-     |> assign(:show_as_free, false)
-     |> assign(:group_bookings_enabled, false)
-     |> assign(:max_participants, to_string(Init.default_group_limit()))
-     |> assign(:booking_limits, Init.get_booking_limits(nil))
-     |> assign(:active_tab, "details")
-     |> assign(username: nil, booking_pages: [], page_memberships: %{})
-     |> assign(:__initialized__, false)}
+     assign(socket,
+       form_errors: %{},
+       form_data: %{},
+       selected_icon: "none",
+       locations: [],
+       venues: [],
+       selected_calendar_integration_id: nil,
+       selected_target_calendar_id: nil,
+       selected_availability_schedule_id: nil,
+       schedules: [],
+       default_schedule_name: Schedules.default_schedule_name(),
+       available_calendars: [],
+       no_writable_calendars: false,
+       target_calendar_status: :ok,
+       refreshing_calendars: false,
+       reminders: [],
+       max_reminders: MeetingTypes.max_reminders(),
+       new_reminder_value: "",
+       new_reminder_unit: "minutes",
+       reminder_error: nil,
+       show_custom_reminder: false,
+       reminder_confirmation: nil,
+       custom_fields: [],
+       save_status: :saved,
+       editing_question: nil,
+       editing_question_mode: :add,
+       editing_location: nil,
+       editing_location_mode: :add,
+       custom_questions_allowed: true,
+       group_bookings_allowed: true,
+       payments_feature_enabled: false,
+       payments_charges_enabled: false,
+       payment_currency: "usd",
+       payment_currency_minimum_cents: 50,
+       payment_required: false,
+       payment_price: "",
+       allow_guests: false,
+       requires_approval: false,
+       approval_window_hours: nil,
+       show_as_free: false,
+       group_bookings_enabled: false,
+       max_participants: to_string(Init.default_group_limit()),
+       show_seat_availability: true,
+       last_spots_threshold: nil,
+       booking_limits: Init.get_booking_limits(nil),
+       active_tab: "details",
+       username: nil,
+       booking_pages: [],
+       page_memberships: %{},
+       __initialized__: false
+     )}
   end
 
   @impl Phoenix.LiveComponent
@@ -439,28 +445,68 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm do
   end
 
   @impl Phoenix.LiveComponent
-  def handle_event("update_reminder_input", %{"reminder" => reminder_params}, socket) do
-    {:noreply, ReminderHandlers.update_reminder_input(reminder_params, socket)}
+  def handle_event("toggle_seat_availability", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_seat_availability, !socket.assigns.show_seat_availability)
+     |> Autosave.maybe_run()}
+  end
+
+  @impl Phoenix.LiveComponent
+  def handle_event("toggle_last_spots", _params, socket) do
+    threshold = if is_nil(socket.assigns.last_spots_threshold), do: Init.default_last_spots()
+
+    {:noreply,
+     socket
+     |> assign(:last_spots_threshold, threshold)
+     |> Autosave.maybe_run()}
+  end
+
+  # The input is bounded by its own min and max, so a value outside them is
+  # clamped rather than refused, and one that is not a number is ignored.
+  @impl Phoenix.LiveComponent
+  def handle_event(
+        "change_last_spots_threshold",
+        %{"meeting_type" => %{"last_spots_threshold_input" => value}},
+        socket
+      ) do
+    case Integer.parse(value) do
+      {count, ""} ->
+        range = Constraints.last_spots_threshold_range()
+
+        {:noreply,
+         socket
+         |> assign(:last_spots_threshold, count |> max(range.first) |> min(range.last))
+         |> Autosave.maybe_run()}
+
+      _not_a_number ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl Phoenix.LiveComponent
+  def handle_event("update_reminder_input", params, socket) do
+    socket |> picker_state() |> ReminderPickerState.update_input(params) |> apply_picker(socket)
   end
 
   @impl Phoenix.LiveComponent
   def handle_event("toggle_custom_reminder", _params, socket) do
-    {:noreply, ReminderHandlers.toggle_custom_reminder(socket)}
+    socket |> picker_state() |> ReminderPickerState.toggle_custom() |> apply_picker(socket)
   end
 
   @impl Phoenix.LiveComponent
   def handle_event("add_quick_reminder", params, socket) do
-    {:noreply, ReminderHandlers.add_quick_reminder(params, socket)}
+    socket |> picker_state() |> ReminderPickerState.add_quick(params) |> apply_picker(socket)
   end
 
   @impl Phoenix.LiveComponent
   def handle_event("add_reminder", _params, socket) do
-    {:noreply, ReminderHandlers.add_reminder(socket)}
+    socket |> picker_state() |> ReminderPickerState.add_custom() |> apply_picker(socket)
   end
 
   @impl Phoenix.LiveComponent
   def handle_event("remove_reminder", params, socket) do
-    {:noreply, ReminderHandlers.remove_reminder(params, socket)}
+    socket |> picker_state() |> ReminderPickerState.remove(params) |> apply_picker(socket)
   end
 
   @impl Phoenix.LiveComponent
@@ -550,4 +596,29 @@ defmodule TymeslotWeb.Dashboard.MeetingSettings.MeetingTypeForm do
   end
 
   defp off_preset_interval?(_value), do: false
+
+  # The reminder picker's own state, as the shared module keeps it. This form
+  # holds each field as an assign of its own, so it is lifted out for the
+  # picker to work on and written straight back.
+  defp picker_state(socket) do
+    Map.take(socket.assigns, [
+      :reminders,
+      :new_reminder_value,
+      :new_reminder_unit,
+      :reminder_error,
+      :show_custom_reminder,
+      :reminder_confirmation
+    ])
+  end
+
+  # A change to the list is worth saving, and starts the timer that takes the
+  # confirmation back down; anything else (a keystroke in the custom row, a
+  # rejected reminder) only updates what is on screen.
+  defp apply_picker({:ok, state}, socket) do
+    Process.send_after(self(), {:clear_reminder_confirmation, socket.assigns.id}, 3000)
+
+    {:noreply, socket |> assign(state) |> Autosave.maybe_run()}
+  end
+
+  defp apply_picker({:noop, state}, socket), do: {:noreply, assign(socket, state)}
 end

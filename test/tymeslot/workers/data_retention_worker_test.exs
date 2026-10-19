@@ -390,6 +390,53 @@ defmodule Tymeslot.Workers.DataRetentionWorkerTest do
       assert Repo.get(UserSchema, user.id)
     end
 
+    test "spares a social account left unverified when sign-in started requiring a verified email" do
+      legacy =
+        insert(:unverified_user,
+          provider: "oauth",
+          provider_uid: "sub-legacy",
+          password_hash: nil,
+          inserted_at: days_ago(400)
+        )
+
+      github =
+        insert(:unverified_user,
+          provider: "github",
+          github_user_id: "7001",
+          password_hash: nil,
+          inserted_at: days_ago(400)
+        )
+
+      assert :ok = perform_job(DataRetentionWorker, %{})
+
+      assert Repo.get(UserSchema, legacy.id)
+      assert Repo.get(UserSchema, github.id)
+    end
+
+    test "spares an admin, however long unverified" do
+      admin = insert(:unverified_user, is_admin: true, inserted_at: days_ago(400))
+
+      assert :ok = perform_job(DataRetentionWorker, %{})
+
+      assert Repo.get(UserSchema, admin.id)
+    end
+
+    test "spares an account that has had a session or finished onboarding" do
+      signed_in =
+        insert(:unverified_user, inserted_at: days_ago(400), last_active_at: days_ago(200))
+
+      onboarded =
+        insert(:unverified_user,
+          inserted_at: days_ago(400),
+          onboarding_completed_at: days_ago(399)
+        )
+
+      assert :ok = perform_job(DataRetentionWorker, %{})
+
+      assert Repo.get(UserSchema, signed_in.id)
+      assert Repo.get(UserSchema, onboarded.id)
+    end
+
     test "deletes the account's dependent rows with it, as an erasure request would" do
       stale = insert(:unverified_user, inserted_at: days_ago(31))
       profile = insert(:profile, user: stale)
@@ -442,6 +489,47 @@ defmodule Tymeslot.Workers.DataRetentionWorkerTest do
 
       refute Repo.reload(retained)
       assert %{attendee_email: nil, attendee_name: nil} = Repo.reload(live)
+    end
+  end
+
+  describe "perform/1 - invitee data" do
+    test "anonymises meetings that ended more than two years ago by default" do
+      old_end = DateTime.utc_now() |> DateTime.add(-731, :day) |> DateTime.truncate(:second)
+      recent_end = DateTime.add(old_end, 2, :day)
+
+      old =
+        insert(:meeting,
+          start_time: DateTime.add(old_end, -1, :hour),
+          end_time: old_end,
+          status: "completed"
+        )
+
+      recent =
+        insert(:meeting,
+          start_time: DateTime.add(recent_end, -1, :hour),
+          end_time: recent_end,
+          status: "completed"
+        )
+
+      assert :ok = perform_job(DataRetentionWorker, %{})
+
+      assert %{attendee_email: nil, invitee_data_erased_at: %DateTime{}} = Repo.reload(old)
+      assert %{attendee_email: email, invitee_data_erased_at: nil} = Repo.reload(recent)
+      assert email == recent.attendee_email
+    end
+
+    test "respects the invitee_data_retention_days argument" do
+      ended = DateTime.utc_now() |> DateTime.add(-40, :day) |> DateTime.truncate(:second)
+
+      meeting =
+        insert(:meeting,
+          start_time: DateTime.add(ended, -1, :hour),
+          end_time: ended,
+          status: "completed"
+        )
+
+      assert :ok = perform_job(DataRetentionWorker, %{"invitee_data_retention_days" => 30})
+      assert %{attendee_email: nil} = Repo.reload(meeting)
     end
   end
 end

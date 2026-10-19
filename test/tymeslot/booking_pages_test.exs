@@ -27,15 +27,40 @@ defmodule Tymeslot.BookingPagesTest do
       assert page.booking_theme == "2"
       assert page.booking_text_enabled == false
 
-      assert %{color_scheme: "ocean"} =
+      assert %{settings: %{"color_scheme" => "ocean"}} =
                ThemeCustomizations.get_by_profile_and_theme({profile.id, page.id}, "2")
     end
 
-    # A row saved under rules since tightened (a retired scheme, preset or
-    # theme) cannot be copied as it is; the page starts without it.
-    test "skips a colour row the current rules reject and copies the rest", %{profile: profile} do
+    # A row saved under rules since tightened (a retired scheme or preset)
+    # reaches the page as the profile's page shows it: that option at its
+    # default, every other option copied.
+    test "copies a colour row the current rules reject with that option's default", %{
+      profile: profile
+    } do
       insert(:theme_customization, profile: profile, theme_id: "2", color_scheme: "ocean")
-      insert(:theme_customization, profile: profile, theme_id: "1", color_scheme: "no-such")
+
+      insert(:theme_customization,
+        profile: profile,
+        theme_id: "1",
+        color_scheme: "no-such",
+        background_value: "gradient_3"
+      )
+
+      assert {:ok, page} =
+               BookingPages.create(profile, %{"name" => "einfachISO", "slug" => "einfachiso"})
+
+      assert %{settings: %{"color_scheme" => "ocean"}} =
+               ThemeCustomizations.get_by_profile_and_theme({profile.id, page.id}, "2")
+
+      assert %{settings: %{"color_scheme" => "default", "background_value" => "gradient_3"}} =
+               ThemeCustomizations.get_by_profile_and_theme({profile.id, page.id}, "1")
+    end
+
+    # A theme retired since its row was saved cannot be copied at all; the
+    # page is still created, without it.
+    test "skips a colour row of a theme the catalogue no longer has", %{profile: profile} do
+      insert(:theme_customization, profile: profile, theme_id: "2", color_scheme: "ocean")
+      insert(:theme_customization, profile: profile, theme_id: "no-such-theme")
 
       {result, log} =
         with_log(fn ->
@@ -44,12 +69,12 @@ defmodule Tymeslot.BookingPagesTest do
 
       assert {:ok, page} = result
 
-      assert %{color_scheme: "ocean"} =
+      assert %{settings: %{"color_scheme" => "ocean"}} =
                ThemeCustomizations.get_by_profile_and_theme({profile.id, page.id}, "2")
 
-      refute ThemeCustomizations.get_by_profile_and_theme({profile.id, page.id}, "1")
+      refute ThemeCustomizations.get_by_profile_and_theme({profile.id, page.id}, "no-such-theme")
       assert log =~ "Skipped a colour row"
-      assert log =~ "color_scheme"
+      assert log =~ "theme_id"
     end
 
     test "refuses an address that is a username", %{profile: profile} do

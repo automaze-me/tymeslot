@@ -11,20 +11,24 @@ defmodule Tymeslot.ThemeCustomizations do
   alias Ecto.Changeset
   alias Tymeslot.Infrastructure.Logging.LogFormat
   alias Tymeslot.Profiles.ProfileSchema
+  alias Tymeslot.ThemeCustomizations.OptionGroup
+  alias Tymeslot.ThemeCustomizations.Options.Background
+  alias Tymeslot.ThemeCustomizations.Options.ColourMode
+  alias Tymeslot.ThemeCustomizations.Options.Cover
+  alias Tymeslot.ThemeCustomizations.Options.Palette
+  alias Tymeslot.ThemeCustomizations.Spec
+  alias Tymeslot.ThemeCustomizations.Specs
   alias Tymeslot.ThemeCustomizations.ThemeCustomizationQueries
   alias Tymeslot.ThemeCustomizations.ThemeCustomizationSchema
+  alias Tymeslot.ThemeCustomizations.Tokens
+  alias Tymeslot.Themes.Catalog
 
   # Functional submodules
   alias __MODULE__.{
-    Backgrounds,
-    Capability,
-    Css,
+    Assets,
     DataTransform,
-    Defaults,
     FileLifecycle,
-    Presets,
-    Storage,
-    Validation
+    Storage
   }
 
   @type profile_id :: pos_integer()
@@ -60,42 +64,108 @@ defmodule Tymeslot.ThemeCustomizations do
   def scope_for(%{id: profile_id}), do: profile_id
 
   @doc """
-  Returns a random video-background preset key (e.g. `"preset:blue-wave"`).
-
-  Used to seed a fresh account with a moving background so its booking page —
-  and the onboarding preview of it — has life out of the box.
+  The video-background preset keys a theme offers (e.g. `"preset:blue-wave"`),
+  in its background group's order. `[]` for a theme without video backgrounds
+  or an unknown id.
   """
-  @spec random_video_preset() :: String.t()
-  def random_video_preset do
-    Presets.get_video_presets()
-    |> Map.keys()
-    |> Enum.random()
+  @spec video_preset_keys(theme_id()) :: [String.t()]
+  def video_preset_keys(theme_id) do
+    with {:ok, spec} <- Catalog.customization_spec(theme_id),
+         %{kinds: kinds} = group <- Specs.group(spec, Background),
+         true <- :video in kinds do
+      group |> Background.presets(:video) |> Enum.map(&elem(&1, 0))
+    else
+      _no_video -> []
+    end
   end
 
   @doc """
-  Creates or updates a theme customization for a profile and theme.
+  Picks a preview video per theme from each theme's own list: one preset drawn
+  from all of them, given to every theme that lists it, and a random one of its
+  own to a theme that does not. Themes with an empty list are left out.
+
+  Used to seed a fresh account with a moving background so its booking page,
+  and the onboarding preview of it, has life out of the box.
+  """
+  @spec preview_videos(%{theme_id() => [String.t()]}) :: %{theme_id() => String.t()}
+  def preview_videos(lists) do
+    lists = Map.reject(lists, fn {_id, keys} -> keys == [] end)
+
+    case lists |> Map.values() |> List.flatten() |> Enum.uniq() do
+      [] ->
+        %{}
+
+      all ->
+        shared = Enum.random(all)
+        Map.new(lists, fn {id, keys} -> {id, preview_video(keys, shared)} end)
+    end
+  end
+
+  defp preview_video(keys, shared),
+    do: if(shared in keys, do: shared, else: Enum.random(keys))
+
+  @doc """
+  Whether a theme can show the given kind of background. `false` for an
+  unknown theme.
+  """
+  @spec supports_background?(theme_id(), Spec.background_kind()) :: boolean()
+  def supports_background?(theme_id, kind) do
+    case Catalog.customization_spec(theme_id) do
+      {:ok, spec} -> Specs.supports_background?(spec, kind)
+      {:error, :theme_not_found} -> false
+    end
+  end
+
+  # What a customisation spec offers, asked of the spec itself rather than a
+  # theme id, so a caller holding a catalogue entry's spec can describe it.
+  @option_modules %{palette: Palette, colour_mode: ColourMode, cover: Cover}
+
+  @typedoc "An option a spec may offer: an option group, or one kind of background."
+  @type offered_option ::
+          :palette | :colour_mode | :cover | {:background, Spec.background_kind()}
+
+  @doc """
+  Whether the customisation `spec` (a theme's `customization_spec`) offers
+  `option`: a palette, a colour mode, a cover, or `{:background, kind}` for
+  one kind of background.
+  """
+  @spec spec_offers?(module(), offered_option()) :: boolean()
+  def spec_offers?(spec, {:background, kind}), do: Specs.supports_background?(spec, kind)
+
+  def spec_offers?(spec, option) when is_map_key(@option_modules, option),
+    do: Specs.group(spec, Map.fetch!(@option_modules, option)) != nil
+
+  @doc """
+  Stores an uploaded file for one of the theme's asset fields and saves it on
+  the scope's customisation. See `Tymeslot.ThemeCustomizations.Assets`.
+  """
+  @spec attach_asset(scope(), theme_id(), atom(), upload_attrs()) ::
+          Assets.result()
+  defdelegate attach_asset(scope, theme_id, field, upload), to: Assets
+
+  @doc """
+  The upload columns the theme's customisation spec declares, with the kind of
+  each; empty for an unknown theme.
+  """
+  @spec asset_fields(theme_id()) :: [{atom(), Spec.asset_kind()}]
+  def asset_fields(theme_id) do
+    case Catalog.customization_spec(theme_id) do
+      {:ok, spec} -> spec.asset_fields()
+      {:error, :theme_not_found} -> []
+    end
+  end
+
+  @doc """
+  Creates or updates a theme customization for a profile and theme. A new
+  row starts from the theme's defaults (the schema changeset reads an empty
+  row through `Specs.settings/2`), so `attrs` need only hold what changes.
   """
   @spec upsert_theme_customization(scope(), theme_id(), map()) ::
           persistence_result()
   def upsert_theme_customization(scope, theme_id, attrs) do
     case get_by_profile_and_theme(scope, theme_id) do
-      nil ->
-        # Create with required defaults if not present
-        create_attrs =
-          Map.merge(
-            %{
-              "color_scheme" => "default",
-              "background_type" => "gradient",
-              "background_value" => "gradient_1"
-            },
-            attrs
-          )
-
-        create_theme_customization(scope, theme_id, create_attrs)
-
-      customization ->
-        # Update only the provided fields
-        update_theme_customization(customization, attrs)
+      nil -> create_theme_customization(scope, theme_id, attrs)
+      customization -> update_theme_customization(customization, attrs)
     end
   end
 
@@ -145,7 +215,12 @@ defmodule Tymeslot.ThemeCustomizations do
     # Perform the atomic database update, then cleanup replaced files on success
     case ThemeCustomizationQueries.update(customization, attrs) do
       {:ok, updated} ->
-        FileLifecycle.cleanup_replaced_files(customization, attrs)
+        FileLifecycle.cleanup_replaced_files(
+          Specs.for_theme(customization.theme_id),
+          customization,
+          updated
+        )
+
         {:ok, updated}
 
       error ->
@@ -169,7 +244,7 @@ defmodule Tymeslot.ThemeCustomizations do
     # Delete database record first, then cleanup files on success
     case ThemeCustomizationQueries.delete(customization) do
       {:ok, deleted} ->
-        FileLifecycle.cleanup_all_files(customization)
+        FileLifecycle.cleanup_all_files(Specs.for_theme(customization.theme_id), customization)
         {:ok, deleted}
 
       error ->
@@ -178,67 +253,67 @@ defmodule Tymeslot.ThemeCustomizations do
   end
 
   @doc """
-  Gets the CSS variables for a color scheme.
-
-  Accepts either a scheme ID (string/atom — looked up in the static preset map)
-  or a customisation map. The map form supports the "custom" scheme: when
-  `color_scheme == "custom"`, the palette is derived from `custom_palette_seed`
-  via `PaletteDerivation.derive_palette/1` instead of preset lookup.
-  """
-  @spec get_color_scheme_css(String.t() | atom() | map()) :: String.t() | nil
-  defdelegate get_color_scheme_css(customization), to: Css
-
-  @doc """
-  Gets the CSS for a gradient preset.
-  """
-  @spec get_gradient_css(String.t() | atom()) :: String.t() | nil
-  defdelegate get_gradient_css(gradient_id), to: Css
-
-  @doc """
-  Converts a theme customization schema to a map for use in capability-based customization.
+  The stored settings of a customisation as a string-keyed map, the shape specs
+  and tokens work on. Empty for `nil`.
   """
   @spec to_map(customization_input()) :: map()
   def to_map(customization) do
-    DataTransform.convert_to_map(customization)
+    DataTransform.to_settings(customization)
   end
 
   @doc """
-  Gets default customization values for a theme based on capabilities.
+  The theme's customisation defaults as string-keyed attrs, from its spec.
   """
   @spec get_defaults(theme_id()) :: map()
   def get_defaults(theme_id) do
-    Capability.get_capability_defaults(theme_id)
+    Map.new(Specs.for_theme(theme_id).defaults(), fn {key, value} ->
+      {Atom.to_string(key), value}
+    end)
   end
 
   @doc """
-  Generates the full theme CSS variables string (capability-based + legacy fallback)
-  for a given theme and customization.
+  An unsaved customisation holding the theme's defaults, for a profile that has
+  not customised the theme (or `nil` for a preview without one).
   """
-  @spec generate_theme_css(theme_id(), customization_input()) :: String.t()
-  def generate_theme_css(theme_id, customization) do
-    Css.generate_theme_css(theme_id, to_map(customization))
+  @spec default_customization(profile_id() | nil, theme_id()) :: ThemeCustomizationSchema.t()
+  def default_customization(profile_id, theme_id) do
+    %ThemeCustomizationSchema{
+      profile_id: profile_id,
+      theme_id: theme_id,
+      settings: get_defaults(theme_id)
+    }
+  end
+
+  @doc """
+  The render tokens for a theme: the saved settings as the spec reads them
+  (`Specs.settings/2`: the theme's defaults when nothing is saved, and a
+  group's defaults in place of settings it no longer accepts) plus any
+  per-request overrides, through the theme's customisation spec.
+  """
+  @spec tokens(theme_id(), ThemeCustomizationSchema.t() | nil, Palette.overrides()) ::
+          Tokens.t()
+  def tokens(theme_id, customization, overrides \\ %{}) do
+    spec = Specs.for_theme(theme_id)
+    spec.tokens(Specs.settings(spec, to_map(customization)), overrides)
   end
 
   # New orchestrator functions for component interface
 
   @doc """
-  Initializes customization data for the component.
-  Returns all data needed for component initialization.
+  The customisation the dashboard starts from: the saved one, or the theme's
+  defaults unsaved, with its settings as the booking page reads them
+  (`Specs.settings/2`), plus the saved original as stored.
   """
   @spec initialize_customization(scope(), theme_id()) :: %{
           customization: ThemeCustomizationSchema.t(),
-          original: ThemeCustomizationSchema.t(),
-          presets: map()
+          original: ThemeCustomizationSchema.t()
         }
   def initialize_customization(scope, theme_id) do
     saved = get_by_profile_and_theme(scope, theme_id)
-    customization = Defaults.build_initial_customization(profile_id_of(scope), theme_id, saved)
+    current = saved || default_customization(scope_profile_id(scope), theme_id)
+    settings = Specs.settings(Specs.for_theme(theme_id), to_map(current))
 
-    %{
-      customization: customization,
-      original: saved || customization,
-      presets: Presets.get_all_presets()
-    }
+    %{customization: %{current | settings: settings}, original: saved || current}
   end
 
   @default_custom_palette_seed "#06b6d4"
@@ -251,106 +326,71 @@ defmodule Tymeslot.ThemeCustomizations do
   def default_custom_palette_seed, do: @default_custom_palette_seed
 
   @doc """
-  Resolves the active colour scheme for a customization, returning the same
-  `%{name, colors}` shape used by both presets and palette derivation.
+  Applies one option change from the customisation panel.
 
-  When `custom_palette_seed` is present on the customization, the palette is
-  derived from that seed; otherwise the `color_scheme` field is looked up in
-  the provided `presets.color_schemes` map.  Returns `nil` if neither resolves
-  to a known scheme.
+  `option_key` names one of the theme spec's `option_groups/0`; `params` is
+  `%{"field" => field, "value" => value}` (the group's module says which it
+  accepts, through `OptionGroup.changes/3`). The change goes through the spec
+  changeset, so an option or value the theme does not support is refused; a
+  stale value in another group never refuses it (`Specs.settings/2`).
+  Returns a translated message on failure.
   """
-  @spec resolve_active_scheme(ThemeCustomizationSchema.t() | map(), map()) :: map() | nil
-  defdelegate resolve_active_scheme(customization, presets), to: Css
-
-  @doc """
-  Applies a color scheme change through the component interface.
-
-  Switching to the "custom" scheme reuses the existing seed if one is already
-  stored; otherwise it seeds with the brand turquoise default. Use
-  `apply_custom_palette_change/4` directly when the user picks a specific
-  custom seed.
-  """
-  @spec apply_color_scheme_change(
-          scope(),
-          theme_id(),
-          ThemeCustomizationSchema.t() | map(),
-          String.t() | atom()
-        ) :: {:ok, ThemeCustomizationSchema.t()} | {:error, String.t()}
-  def apply_color_scheme_change(scope, theme_id, current_customization, "custom") do
-    seed = Css.get_seed(current_customization) || @default_custom_palette_seed
-    apply_custom_palette_change(scope, theme_id, current_customization, seed)
-  end
-
-  def apply_color_scheme_change(scope, theme_id, current_customization, scheme_id) do
-    with :ok <- Validation.validate_color_scheme(scheme_id),
-         :ok <- validate_theme_capability(theme_id, %{"color_scheme" => scheme_id}),
-         new_customization <-
-           DataTransform.merge_customization_changes(current_customization, %{
-             color_scheme: scheme_id,
-             custom_palette_seed: nil
-           }),
-         save_attrs <- DataTransform.extract_save_attributes(new_customization) do
+  @spec apply_option(scope(), theme_id(), atom(), map()) ::
+          {:ok, ThemeCustomizationSchema.t()} | {:error, String.t()}
+  def apply_option(scope, theme_id, option_key, %{"field" => field, "value" => value})
+      when is_binary(field) and is_binary(value) do
+    with {:ok, group} <- option_group(theme_id, option_key),
+         {:ok, changes} <- group.module.changes(field, value, group) do
+      # The save starts from the stored settings as `Specs.settings/2` reads
+      # them (the schema changeset), so only the change is passed and only
+      # its group is judged. The update deletes any upload the change stops
+      # naming (`update_theme_customization/2`).
       scope
-      |> upsert_theme_customization(theme_id, save_attrs)
+      |> upsert_theme_customization(theme_id, changes)
       |> format_persistence_error()
+    else
+      :error -> {:error, option_unavailable()}
+    end
+  end
+
+  def apply_option(_profile_id, _theme_id, _option_key, _params),
+    do: {:error, option_unavailable()}
+
+  @doc "The theme spec's option groups, in panel order; empty for an unknown theme."
+  @spec option_groups(theme_id()) :: [OptionGroup.group()]
+  def option_groups(theme_id) do
+    case Catalog.customization_spec(theme_id) do
+      {:ok, spec} -> spec.option_groups()
+      {:error, :theme_not_found} -> []
     end
   end
 
   @doc """
-  Switches the customisation to the "custom" colour scheme and persists the seed
-  hex used to derive the palette.
-
-  The seed must be a 6-character hex string (with leading `#`); otherwise an
-  error is returned without touching the database.
+  What the onboarding wizard offers for a theme (`Spec.onboarding_choices/0`),
+  or `nil` when its spec offers nothing. An unknown theme reads the default
+  theme's spec.
   """
-  @spec apply_custom_palette_change(
-          scope(),
-          theme_id(),
-          ThemeCustomizationSchema.t() | map(),
-          String.t()
-        ) :: {:ok, ThemeCustomizationSchema.t()} | {:error, String.t()}
-  def apply_custom_palette_change(scope, theme_id, current_customization, seed_hex) do
-    with :ok <- Css.validate_seed_hex(seed_hex),
-         new_customization <-
-           DataTransform.merge_customization_changes(current_customization, %{
-             custom_palette_seed: String.downcase(seed_hex)
-           }),
-         save_attrs <- DataTransform.extract_save_attributes(new_customization) do
-      scope
-      |> upsert_theme_customization(theme_id, save_attrs)
-      |> format_persistence_error()
+  @spec onboarding_choices(theme_id()) :: Spec.onboarding_choices()
+  def onboarding_choices(theme_id) do
+    spec = Specs.for_theme(theme_id)
+
+    # Optional callback: a spec written without `use Spec` may leave it out.
+    # `ensure_loaded?/1` first, because in dev and test a module is loaded on
+    # first use and `function_exported?/3` is false until then.
+    if Code.ensure_loaded?(spec) and function_exported?(spec, :onboarding_choices, 0),
+      do: spec.onboarding_choices(),
+      else: nil
+  end
+
+  defp option_group(theme_id, key) do
+    case Enum.find(option_groups(theme_id), &(&1.key == key)) do
+      nil -> :error
+      group -> {:ok, group}
     end
   end
 
-  @doc """
-  Applies a background change through the component interface.
-  """
-  @spec apply_background_change(
-          scope(),
-          theme_id(),
-          ThemeCustomizationSchema.t() | map(),
-          String.t(),
-          String.t() | nil
-        ) :: {:ok, ThemeCustomizationSchema.t()} | {:error, String.t()}
-  def apply_background_change(scope, theme_id, current_customization, type, value) do
-    presets = Presets.get_all_presets()
-
-    with :ok <- Validation.validate_background_selection(type, value, presets),
-         :ok <- validate_theme_capability(theme_id, %{"background_type" => type}),
-         new_customization <-
-           Backgrounds.apply_background_selection(current_customization, type, value),
-         cleanup_files <-
-           Backgrounds.determine_cleanup_files(current_customization, new_customization),
-         save_attrs <- DataTransform.extract_save_attributes(new_customization),
-         {:ok, saved} <-
-           scope
-           |> upsert_theme_customization(theme_id, save_attrs)
-           |> format_persistence_error() do
-      Enum.each(cleanup_files, &FileLifecycle.cleanup_old_backgrounds/1)
-
-      {:ok, saved}
-    end
-  end
+  defp option_unavailable,
+    do: dgettext("dashboard_appearance", "This option is not available for this theme.")
 
   @doc """
   Gets a theme customization for a user, falling back to defaults.
@@ -372,39 +412,18 @@ defmodule Tymeslot.ThemeCustomizations do
   end
 
   @doc """
-  Stores a background image for a scope and theme.
-
-  A booking page's upload is stored as `page-<page_id>-<filename>`, so it can
-  never overwrite (and later delete) the profile's or another page's file of
-  the same name.
-  """
-  @spec store_background_image(scope(), theme_id(), upload_attrs()) ::
-          {:ok, String.t()} | {:error, term()}
-  def store_background_image(scope, theme_id, upload) do
-    Storage.store_background_image(profile_id_of(scope), theme_id, scoped_upload(scope, upload))
-  end
-
-  @doc """
-  Stores a background video for a scope and theme (see `store_background_image/3`).
-  """
-  @spec store_background_video(scope(), theme_id(), upload_attrs()) ::
-          {:ok, String.t()} | {:error, term()}
-  def store_background_video(scope, theme_id, upload) do
-    Storage.store_background_video(profile_id_of(scope), theme_id, scoped_upload(scope, upload))
-  end
-
-  @doc """
   Gives a new booking page copies of its profile's customizations.
 
-  Colour schemes, palettes, gradients, plain colours and preset backgrounds are
-  copied. An uploaded image or video background (`background_value == "custom"`)
-  is not: the page gets that theme's default background instead, since a file
-  shared between two rows would be deleted from under one of them when the
-  other replaced it.
+  Each theme's settings are copied as the profile's page shows them
+  (`Specs.settings/2`), so an option the current rules reject (a scheme or
+  preset retired since it was saved) arrives as that option's default. An
+  uploaded file is not copied: an option group holding one (an uploaded
+  background image or video, say) starts from the theme's defaults on the page
+  instead, since a file shared between two rows would be deleted from under
+  one of them when the other replaced it.
 
-  A row the current rules reject (saved before a scheme, preset or theme was
-  retired) is left out and logged, so it cannot stop the page being created;
-  that theme starts from its defaults on the page. Stops at, and returns, the
+  A row that cannot be copied at all (its theme was retired) is left out and
+  logged, so it cannot stop the page being created. Stops at, and returns, the
   first insert the database refuses.
   """
   @spec copy_to_page(profile_id(), pos_integer()) :: :ok | {:error, Changeset.t()}
@@ -452,26 +471,32 @@ defmodule Tymeslot.ThemeCustomizations do
     end)
   end
 
+  @doc "The profile a scope (see `t:scope/0`) belongs to."
+  @spec scope_profile_id(scope()) :: profile_id()
+  def scope_profile_id({profile_id, _page_id}), do: profile_id
+  def scope_profile_id(profile_id), do: profile_id
+
   # Private functions
 
-  defp copy_attrs(%{background_value: "custom"} = row) do
-    defaults = Defaults.get_theme_defaults(row.theme_id)
+  # The row's settings as its page reads them, less every option group that
+  # names an uploaded file: leaving a group out lets the new row start it from
+  # the theme's defaults.
+  defp copy_attrs(row) do
+    spec = Specs.for_theme(row.theme_id)
 
-    %{
-      "color_scheme" => row.color_scheme,
-      "custom_palette_seed" => row.custom_palette_seed,
-      "background_type" => defaults.background_type,
-      "background_value" => defaults.background_value
-    }
+    Enum.reduce(spec.option_groups(), Specs.settings(spec, to_map(row)), fn group, settings ->
+      if holds_upload?(settings, group),
+        do: Map.drop(settings, Enum.map(Map.keys(group.module.types()), &Atom.to_string/1)),
+        else: settings
+    end)
   end
 
-  defp copy_attrs(row) do
-    %{
-      "color_scheme" => row.color_scheme,
-      "custom_palette_seed" => row.custom_palette_seed,
-      "background_type" => row.background_type,
-      "background_value" => row.background_value
-    }
+  defp holds_upload?(settings, group) do
+    group
+    |> OptionGroup.asset_fields()
+    |> Enum.any?(fn {field, _kind} ->
+      Map.get(settings, Atom.to_string(field)) not in [nil, ""]
+    end)
   end
 
   defp scope_attrs({profile_id, page_id}),
@@ -479,33 +504,18 @@ defmodule Tymeslot.ThemeCustomizations do
 
   defp scope_attrs(profile_id), do: %{"profile_id" => profile_id}
 
-  defp profile_id_of({profile_id, _page_id}), do: profile_id
-  defp profile_id_of(profile_id), do: profile_id
-
-  defp scoped_upload({_profile_id, page_id}, %{filename: filename} = upload),
-    do: %{upload | filename: "page-#{page_id}-#{filename}"}
-
-  defp scoped_upload(_profile_id, upload), do: upload
-
-  defp validate_theme_capability(theme_id, attrs) do
-    case Capability.validate_customization(theme_id, attrs) do
-      {:ok, _attrs} -> :ok
-      {:error, reasons} -> {:error, Enum.join(reasons, "; ")}
-    end
-  end
-
-  # Converts unexpected changeset errors from persistence into a user-safe
-  # string. Callers flash the returned message, and `Flash.error/1` guards on
-  # binaries — a raw changeset would crash the component.
-  @spec format_persistence_error(persistence_result()) ::
+  # Converts a rejected write (an invalid changeset or an invalid seed) into a
+  # user-safe string. Callers flash the returned message, and `Flash.error/1`
+  # guards on binaries, so a raw changeset would crash the component.
+  @spec format_persistence_error({:ok, ThemeCustomizationSchema.t()} | {:error, term()}) ::
           {:ok, ThemeCustomizationSchema.t()} | {:error, String.t()}
   defp format_persistence_error({:ok, _result} = ok), do: ok
 
-  defp format_persistence_error({:error, %Changeset{}}),
+  defp format_persistence_error({:error, _reason}),
     do:
       {:error,
        dgettext(
          "dashboard_appearance",
-         "Could not save your theme customization. Please try again."
+         "Could not save your theme customisation. Please try again."
        )}
 end

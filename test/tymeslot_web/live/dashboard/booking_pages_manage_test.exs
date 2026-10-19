@@ -4,7 +4,6 @@ defmodule TymeslotWeb.Dashboard.BookingPagesManageTest do
   @moduletag :dashboard
   @moduletag :themes
 
-  import ExUnit.CaptureLog
   import Tymeslot.DashboardTestHelpers
   import Tymeslot.Factory
 
@@ -12,6 +11,7 @@ defmodule TymeslotWeb.Dashboard.BookingPagesManageTest do
   alias Tymeslot.BookingPages
   alias Tymeslot.Repo
   alias Tymeslot.Security.RateLimiter
+  alias Tymeslot.ThemeCustomizations
 
   setup :setup_dashboard_user_with_theme
 
@@ -56,16 +56,17 @@ defmodule TymeslotWeb.Dashboard.BookingPagesManageTest do
 
     view |> element("[data-testid='new-booking-page']") |> render_click()
 
-    log =
-      capture_log(fn ->
-        view
-        |> form("#new-booking-page-form", page: %{name: "einfachISO", slug: "einfachiso"})
-        |> render_submit()
-      end)
+    view
+    |> form("#new-booking-page-form", page: %{name: "einfachISO", slug: "einfachiso"})
+    |> render_submit()
 
     assert [page] = BookingPages.list(ctx.profile.id)
     assert_patch(view, ~p"/dashboard/theme?#{[page: page.id]}")
-    assert log =~ "Skipped a colour row"
+
+    # The page gets the row as the main page shows it: the rejected scheme
+    # at its default.
+    assert %{settings: %{"color_scheme" => "default"}} =
+             ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, page.id}, "1")
   end
 
   # The address follows the name, keystroke by keystroke, until the host

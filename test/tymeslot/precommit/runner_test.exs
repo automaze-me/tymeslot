@@ -129,6 +129,15 @@ defmodule Tymeslot.Precommit.RunnerTest do
     end
   end
 
+  describe "suite?/1" do
+    test "is keyed off the command, so either repository's suite command counts" do
+      assert Runner.suite?({"test", ["test"], :test})
+      assert Runner.suite?({"test", ["test.elixir", "test/a_test.exs"], :test})
+      refute Runner.suite?({"js", ["test.js"], :dev})
+      refute Runner.suite?({"test", ["credo", "--strict"], :dev})
+    end
+  end
+
   describe "run/3 with the suite in the background" do
     test "the suite runs while the static checks do" do
       test_pid = self()
@@ -515,6 +524,47 @@ defmodule Tymeslot.Precommit.RunnerTest do
 
         send(from, {:io_reply, ref, :ok})
         forward_io(test_pid)
+    end
+  end
+
+  # The fixture is a warning the compiler printed verbatim while building this
+  # repository as a path dependency, so the pattern is pinned to the real
+  # location format rather than to a guess at it.
+  describe "dependency_warnings/2" do
+    @dependency_warning """
+    ==> tymeslot
+        warning: TymeslotWeb.Test.FixtureTheme.Theme.live_view_module/0 is undefined (module TymeslotWeb.Test.FixtureTheme.Theme is not available or is yet to be defined)
+        │
+     99 │       module -> module.live_view_module()
+        │                        ~
+        │
+        └─ (tymeslot 1.19.0) lib/tymeslot_web/themes/core/theme_info.ex:99:24: TymeslotWeb.Themes.Core.ThemeInfo.get_live_view_module/1
+
+    ==> app
+    Generated app app
+    """
+
+    test "names a path dependency a warning is located in" do
+      assert Runner.dependency_warnings(@dependency_warning, [:tymeslot]) == [:tymeslot]
+    end
+
+    test "names each dependency once, however many warnings it printed" do
+      output = @dependency_warning <> @dependency_warning
+      assert Runner.dependency_warnings(output, [:tymeslot]) == [:tymeslot]
+    end
+
+    test "ignores a warning in a dependency that is not a path dependency" do
+      assert Runner.dependency_warnings(@dependency_warning, [:other]) == []
+    end
+
+    test "ignores a warning in the project's own files" do
+      output = String.replace(@dependency_warning, "(tymeslot 1.19.0) ", "")
+      assert Runner.dependency_warnings(output, [:tymeslot]) == []
+    end
+
+    test "a clean build names none" do
+      assert Runner.dependency_warnings("==> tymeslot\nCompiling 3 files (.ex)\n", [:tymeslot]) ==
+               []
     end
   end
 

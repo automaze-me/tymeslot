@@ -26,10 +26,10 @@ defmodule Tymeslot.ThemeCustomizations.PageScopeTest do
       color_scheme: "rose"
     )
 
-    assert %{color_scheme: "ocean"} =
+    assert %{settings: %{"color_scheme" => "ocean"}} =
              ThemeCustomizations.get_by_profile_and_theme(ctx.profile.id, "1")
 
-    assert %{color_scheme: "rose"} =
+    assert %{settings: %{"color_scheme" => "rose"}} =
              ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, ctx.page.id}, "1")
   end
 
@@ -43,7 +43,7 @@ defmodule Tymeslot.ThemeCustomizations.PageScopeTest do
 
     other = insert(:profile)
 
-    assert %{color_scheme: "rose"} =
+    assert %{settings: %{"color_scheme" => "rose"}} =
              ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, ctx.page.id}, "1")
 
     assert ThemeCustomizations.get_by_profile_and_theme({other.id, ctx.page.id}, "1") == nil
@@ -53,14 +53,17 @@ defmodule Tymeslot.ThemeCustomizations.PageScopeTest do
     insert(:theme_customization, profile: ctx.profile, theme_id: "1", color_scheme: "ocean")
 
     scope = {ctx.profile.id, ctx.page.id}
-    %{customization: current} = ThemeCustomizations.initialize_customization(scope, "1")
 
-    {:ok, page_row} = ThemeCustomizations.apply_color_scheme_change(scope, "1", current, "purple")
+    {:ok, page_row} =
+      ThemeCustomizations.apply_option(scope, "1", :palette, %{
+        "field" => "scheme",
+        "value" => "purple"
+      })
 
     assert page_row.booking_page_id == ctx.page.id
-    assert page_row.color_scheme == "purple"
+    assert page_row.settings["color_scheme"] == "purple"
 
-    assert %{color_scheme: "ocean"} =
+    assert %{settings: %{"color_scheme" => "ocean"}} =
              ThemeCustomizations.get_by_profile_and_theme(ctx.profile.id, "1")
   end
 
@@ -94,13 +97,18 @@ defmodule Tymeslot.ThemeCustomizations.PageScopeTest do
     quill = ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, ctx.page.id}, "1")
     rhythm = ThemeCustomizations.get_by_profile_and_theme({ctx.profile.id, ctx.page.id}, "2")
 
-    assert %{color_scheme: "ocean", background_type: "gradient", background_value: "gradient_3"} =
-             quill
+    assert %{
+             "color_scheme" => "ocean",
+             "background_type" => "gradient",
+             "background_value" => "gradient_3"
+           } = quill.settings
 
     # Rhythm's own default background stands in for the uploaded image.
-    assert rhythm.color_scheme == "rose"
-    assert rhythm.background_image_path == nil
-    assert {rhythm.background_type, rhythm.background_value} == {"video", "preset:rhythm-default"}
+    assert rhythm.settings["color_scheme"] == "rose"
+    refute Map.has_key?(rhythm.settings, "background_image_path")
+
+    assert {rhythm.settings["background_type"], rhythm.settings["background_value"]} ==
+             {"video", "preset:rhythm-default"}
   end
 
   test "delete_page_customizations removes only the page's rows", ctx do

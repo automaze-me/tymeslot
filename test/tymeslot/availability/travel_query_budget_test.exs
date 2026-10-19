@@ -106,6 +106,7 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
           @home,
           ctx.in_trip.year,
           ctx.in_trip.month,
+          :monday,
           ctx.profile,
           nil,
           ctx.meeting_type
@@ -185,7 +186,14 @@ defmodule Tymeslot.Availability.TravelQueryBudgetTest do
       count =
         count_trip_queries(ctx.profile.id, fn ->
           days =
-            Calculate.get_calendar_days(@home, ctx.in_trip.year, ctx.in_trip.month, config, nil)
+            Calculate.get_calendar_days(
+              @home,
+              ctx.in_trip.year,
+              ctx.in_trip.month,
+              :monday,
+              config,
+              nil
+            )
 
           refute days == []
         end)

@@ -8,6 +8,12 @@ defmodule Tymeslot.Precommit.Runner do
   as a second compile in a different `MIX_ENV`) is a barrier: if it fails,
   downstream steps would only report noise, so the run stops there.
 
+  A `mix compile` step also fails when it prints a warning located in a path
+  dependency, even though it exits zero. `--warnings-as-errors` never reaches a
+  dependency (`mix deps.compile` passes `--no-warnings-as-errors`), and a path
+  dependency is source the workspace owns, so its warnings are defects too.
+  Warnings in fetched packages still pass.
+
   ## What runs at the same time
 
   Once the compile barriers have passed, nothing downstream needs anything from
@@ -75,7 +81,10 @@ defmodule Tymeslot.Precommit.Runner do
   is what lets another repository's suite use that one at the same time.
   """
 
+  alias Mix.Project
+  alias Mix.SCM.Path, as: PathSCM
   alias Tymeslot.Infrastructure.Tasks
+  alias Tymeslot.Precommit.Tee
 
   @barrier_prefix "compile"
   @result_prefix "precommit: "
@@ -87,6 +96,21 @@ defmodule Tymeslot.Precommit.Runner do
   @type capture_fun ::
           ([String.t()], atom(), [{String.t(), String.t()}] -> {String.t(), non_neg_integer()})
   @type suite_plan_fun :: (-> Tymeslot.Precommit.CpuBudget.plan() | nil)
+
+  # `test.elixir` is the suite in the repository that consumes Core as a path
+  # dependency, whose `test` alias also runs the JavaScript suites; its gate
+  # runs those as a step of their own.
+  @suite_commands ~w[test test.elixir]
+
+  @doc """
+  Whether `step` runs the Elixir suite.
+
+  Keyed off the command rather than the step's display name, matching
+  `step_env/1`: the name is a label and can be reworded, the command is the
+  contract.
+  """
+  @spec suite?(step()) :: boolean()
+  def suite?({_name, [command | _rest], _env}), do: command in @suite_commands
 
   @spec run([step()], boolean(), keyword()) :: :ok
   def run(steps, fail_fast?, opts \\ []) do
@@ -280,11 +304,7 @@ defmodule Tymeslot.Precommit.Runner do
     end
   end
 
-  # Keyed off the command rather than the step's display name, matching
-  # `step_env/1`: the name is a label and can be reworded, the command is the
-  # contract.
-  defp background?({_name, ["test" | _rest], _env}), do: true
-  defp background?(_step), do: false
+  defp background?(step), do: suite?(step)
 
   # Steps that can rewrite `_build/dev` and so must not overlap the steps that
   # read it. Keyed off the command for the same reason as `background?/1`.
@@ -311,6 +331,34 @@ defmodule Tymeslot.Precommit.Runner do
   end
 
   defp barrier?(name), do: String.starts_with?(name, @barrier_prefix)
+
+  # A compile step also fails on a warning located in a path dependency.
+  # `mix deps.compile` always compiles a dependency with
+  # `--no-warnings-as-errors`, so the flag on the step reaches this project's
+  # own modules only, and a warning in a sibling checkout this workspace owns
+  # would otherwise scroll past a green step. Warnings in fetched packages are
+  # left alone: they are not ours to fix.
+  defp cmd(["compile" | _rest] = args, env) do
+    {tee, code} =
+      System.cmd("mix", args,
+        into: %Tee{},
+        stderr_to_stdout: true,
+        env: [{"MIX_ENV", to_string(env)} | step_env(args)]
+      )
+
+    warned = dependency_warnings(Tee.output(tee), path_dependencies())
+
+    if code == 0 and warned != [] do
+      Mix.shell().error(
+        "Warnings in path dependencies: #{Enum.map_join(warned, ", ", &to_string/1)}. " <>
+          "Mix compiles dependencies without --warnings-as-errors, so this step fails on them instead."
+      )
+
+      1
+    else
+      code
+    end
+  end
 
   defp cmd(args, env) do
     {_output, code} =
@@ -370,6 +418,25 @@ defmodule Tymeslot.Precommit.Runner do
   end
 
   def step_env(_args), do: []
+
+  @doc false
+  @spec dependency_warnings(String.t(), [atom()]) :: [atom()]
+  def dependency_warnings(_output, []), do: []
+
+  def dependency_warnings(output, apps) do
+    names = Map.new(apps, &{Atom.to_string(&1), &1})
+
+    # The compiler names a dependency's file as `(app version) path:line`,
+    # on the location line under each warning it prints.
+    ~r/^[\s│├└─]*\(([a-z][a-z0-9_]*) [^\s)]+\) \S+:\d+/mu
+    |> Regex.scan(output, capture: :all_but_first)
+    |> Enum.flat_map(fn [name] -> List.wrap(names[name]) end)
+    |> Enum.uniq()
+  end
+
+  defp path_dependencies do
+    for {app, PathSCM} <- Project.deps_scms(), do: app
+  end
 
   @doc false
   @spec dialyzer_schedulers(pos_integer()) :: pos_integer()

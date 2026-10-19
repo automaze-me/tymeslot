@@ -3,6 +3,7 @@ defmodule Tymeslot.Repo.Migrations.CreateTravelPeriods do
 
   # excellent_migrations:safety-assured-for-this-file column_reference_added
   # excellent_migrations:safety-assured-for-this-file index_not_concurrently
+  # excellent_migrations:safety-assured-for-this-file check_constraint_added
   # Both tables are brand new, so their defaults, foreign keys, indexes and
   # check constraint cannot rewrite or lock any existing row.
 

@@ -100,6 +100,7 @@ defmodule Tymeslot.Meetings.MeetingSchema do
           tracking_params: map(),
           visitor_hash: String.t() | nil,
           booking_page_id: integer() | nil,
+          invitee_data_erased_at: DateTime.t() | nil,
           organizer_user: any() | Ecto.Association.NotLoaded.t() | nil,
           calendar_integration: any() | Ecto.Association.NotLoaded.t() | nil,
           video_integration: any() | Ecto.Association.NotLoaded.t() | nil,
@@ -316,6 +317,11 @@ defmodule Tymeslot.Meetings.MeetingSchema do
     # The booking page the booking came through; nil for `/<username>`, a
     # direct link under it, or a booking that came through no page at all.
     field(:booking_page_id, :id)
+
+    # Stamped once the retention purge has removed everything the invitees
+    # gave, so the purge passes over the meeting from then on. See
+    # `Tymeslot.InviteeData`.
+    field(:invitee_data_erased_at, :utc_datetime)
 
     timestamps(type: :utc_datetime)
   end
