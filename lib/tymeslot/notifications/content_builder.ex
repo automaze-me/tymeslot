@@ -134,30 +134,40 @@ defmodule Tymeslot.Notifications.ContentBuilder do
   templates read (`:reminders_summary`, `:location_type`, `:booking_payment`,
   and a `:date` that is a `Date` rather than a `DateTime`), which crashes the
   render mid-reschedule and takes the webhook dispatch down with it.
+
+  `moved_by: :host` marks a move the host made in their own calendar; the
+  organiser's email then says so instead of naming the attendee.
   """
-  @spec build_reschedule_details(%{atom() => term()}, %{atom() => term()}) :: %{atom() => term()}
-  def build_reschedule_details(updated_meeting, original_meeting) do
+  @spec build_reschedule_details(%{atom() => term()}, %{atom() => term()}, keyword()) ::
+          %{atom() => term()}
+  def build_reschedule_details(updated_meeting, original_meeting, opts \\ []) do
     organizer_timezone = Recipients.get_organizer_timezone(updated_meeting)
 
     base_details = AppointmentBuilder.from_meeting(updated_meeting)
     attendee_timezone = base_details.attendee_timezone
 
-    Map.merge(base_details, %{
-      # Original meeting details for comparison
-      original_date: DateTime.to_date(original_meeting.start_time),
-      original_start_time: original_meeting.start_time,
-      original_start_time_owner_tz:
-        convert_to_timezone(original_meeting.start_time, organizer_timezone),
-      original_start_time_attendee_tz:
-        convert_to_timezone(original_meeting.start_time, attendee_timezone),
-      original_end_time: original_meeting.end_time,
-      original_attendee_video_url: Map.get(original_meeting, :attendee_video_url),
+    details =
+      Map.merge(base_details, %{
+        # Original meeting details for comparison
+        original_date: DateTime.to_date(original_meeting.start_time),
+        original_start_time: original_meeting.start_time,
+        original_start_time_owner_tz:
+          convert_to_timezone(original_meeting.start_time, organizer_timezone),
+        original_start_time_attendee_tz:
+          convert_to_timezone(original_meeting.start_time, attendee_timezone),
+        original_end_time: original_meeting.end_time,
+        original_attendee_video_url: Map.get(original_meeting, :attendee_video_url),
 
-      # Reschedule context
-      is_rescheduled: true,
-      rescheduled_at: DateTime.utc_now()
-    })
+        # Reschedule context
+        is_rescheduled: true,
+        rescheduled_at: DateTime.utc_now()
+      })
+
+    put_moved_by(details, Keyword.get(opts, :moved_by))
   end
+
+  defp put_moved_by(details, nil), do: details
+  defp put_moved_by(details, moved_by), do: Map.put(details, :moved_by, moved_by)
 
   @doc """
   Builds reschedule details for a booking whose new time was approved after a

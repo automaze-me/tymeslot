@@ -170,10 +170,15 @@ defmodule Tymeslot.Bookings.Reschedule do
 
     case MeetingQueries.update_meeting(meeting, attrs) do
       {:ok, updated} ->
-        after_commit(updated, meeting)
+        after_commit(updated, meeting, moved_by: :host)
         {:ok, updated}
 
-      {:error, _reason} ->
+      {:error, reason} ->
+        Logger.warning("Failed to move the meeting to its calendar event's time",
+          meeting_id: meeting.id,
+          reason: LogFormat.reason(reason)
+        )
+
         {:error, :failed_to_update_meeting}
     end
   end
@@ -183,18 +188,57 @@ defmodule Tymeslot.Bookings.Reschedule do
   # Everything a committed reschedule sets off outside the meeting row: fresh
   # availability, the provider side of any room the move left behind or
   # moved, and the emails.
-  defp after_commit(updated_meeting, original_meeting) do
+  #
+  # `opts` is `moved_by: :host` when the host moved the event themselves
+  # (`follow_calendar/3`), so the organiser's email does not claim the
+  # attendee moved it; it is unused where nothing is announced.
+  defp after_commit(updated_meeting, original_meeting, opts \\ []) do
     AvailabilityCache.invalidate_for_user(updated_meeting.organizer_user_id)
     RescheduleLocation.release_abandoned_room(updated_meeting, original_meeting)
     sync_provider_video_room(updated_meeting)
-    announce(updated_meeting, original_meeting)
+    announce(updated_meeting, original_meeting, opts)
   end
 
   # What moving a meeting to a new time changes on its row, whichever path
   # moves it: the times, the settled reschedule request, the reminder
   # tracking, the calendar revision, the external-change flag and the join
-  # links that expire relative to the meeting time. The comments in
-  # `apply_time_update_and_schedule_job/4` explain each.
+  # links that expire relative to the meeting time.
+  #
+  # Booking a new time settles any pending organizer reschedule request, so
+  # the slot becomes live again — clear the timestamp.
+  #
+  # Reminder sent-tracking is reset too: the reminder(s) already sent were
+  # pinned to the old time, so they must not suppress the re-pinned
+  # reminder jobs scheduled for the new time.
+  #
+  # Join links that expire relative to the meeting time (Jitsi tokens) are
+  # rebuilt for the new time here, before the write, rather than in
+  # `VideoSyncWorker`: the reschedule emails are rendered from the
+  # meeting this write returns, and the calendar and webhook jobs read the
+  # row it commits, so a link refreshed any later would already have been
+  # sent out stale. Writing them with the new time also leaves no moment
+  # where the row pairs the new time with the old links. Building them is
+  # local computation, and a failure keeps the stored links rather than
+  # failing the reschedule.
+  #
+  # The new time is a new revision of the calendar entry, so `ical_sequence`
+  # moves on. It records the revision of the last calendar entry sent out,
+  # the same meaning `AttendeeNotifications.Worker` gives it when the host
+  # moves the event in their own calendar: the reschedule email carries this
+  # value, and anything sent later (another reschedule, a cancellation, a
+  # host-side change) goes past it. Left at 0, every reschedule sent
+  # SEQUENCE 1 again and calendar clients had only DTSTAMP to tell the
+  # entries apart.
+  #
+  # A reschedule that re-enters the approval gate sends no calendar entry at
+  # all (see `announce/3`), so the bump reserves the revision rather than
+  # announcing it: the confirmation ICS the host's approval sends carries
+  # this value, and nothing else has used it in the meantime. A request that
+  # is declined or expires simply leaves the revision unspent, which costs
+  # nothing: SEQUENCE has to rise, not to run consecutively.
+  #
+  # An external-change flag, and the host's dismissal of it, described the
+  # old time, so the new time starts without either.
   defp time_change_attrs(meeting, start_dt, end_dt) do
     Map.merge(
       %{
@@ -217,44 +261,8 @@ defmodule Tymeslot.Bookings.Reschedule do
          meeting_type,
          location_attrs
        ) do
-    # Booking a new time settles any pending organizer reschedule request, so
-    # the slot becomes live again — clear the timestamp.
-    #
-    # Reminder sent-tracking is reset too: the reminder(s) already sent were
-    # pinned to the old time, so they must not suppress the re-pinned
-    # reminder jobs scheduled for the new time.
-    #
     # The location lands in the same write as the times, so the calendar job
     # scheduled below already carries it.
-    #
-    # Join links that expire relative to the meeting time (Jitsi tokens) are
-    # rebuilt for the new time here, before the write, rather than in
-    # `VideoSyncWorker`: the reschedule emails below are rendered from the
-    # meeting this write returns, and the calendar and webhook jobs read the
-    # row it commits, so a link refreshed any later would already have been
-    # sent out stale. Writing them with the new time also leaves no moment
-    # where the row pairs the new time with the old links. Building them is
-    # local computation, and a failure keeps the stored links rather than
-    # failing the reschedule.
-    #
-    # The new time is a new revision of the calendar entry, so `ical_sequence`
-    # moves on. It records the revision of the last calendar entry sent out,
-    # the same meaning `AttendeeNotifications.Worker` gives it when the host
-    # moves the event in their own calendar: the reschedule email carries this
-    # value, and anything sent later (another reschedule, a cancellation, a
-    # host-side change) goes past it. Left at 0, every reschedule sent
-    # SEQUENCE 1 again and calendar clients had only DTSTAMP to tell the
-    # entries apart.
-    #
-    # A reschedule that re-enters the approval gate sends no calendar entry at
-    # all (see `announce/2`), so the bump reserves the revision rather than
-    # announcing it: the confirmation ICS the host's approval sends carries
-    # this value, and nothing else has used it in the meantime. A request that
-    # is declined or expires simply leaves the revision unspent, which costs
-    # nothing: SEQUENCE has to rise, not to run consecutively.
-    #
-    # An external-change flag, and the host's dismissal of it, described the
-    # old time, so the new time starts without either.
     attrs =
       meeting
       |> time_change_attrs(start_dt, end_dt)
@@ -385,7 +393,7 @@ defmodule Tymeslot.Bookings.Reschedule do
   # analogous to `Tymeslot.Meetings.AttendeeNotifications`'s ICS handling,
   # which lives outside this module's booking-email templates and is left for
   # that work rather than bolted on here.
-  defp announce(%{status: "awaiting_approval"} = updated, original) do
+  defp announce(%{status: "awaiting_approval"} = updated, original, _opts) do
     cancel_stale_reminders(updated)
     GuestNotifications.prepare_for_reapproval(updated)
 
@@ -427,7 +435,7 @@ defmodule Tymeslot.Bookings.Reschedule do
   # `apply_time_update_and_schedule_job/3`'s own is harmless:
   # `CalendarJobs.schedule_job/2` is uniqueness-guarded and reports the second
   # insert as `:already_scheduled`.
-  defp announce(%{status: "confirmed"} = updated, %{status: "awaiting_approval"}) do
+  defp announce(%{status: "confirmed"} = updated, %{status: "awaiting_approval"}, _opts) do
     Approval.activate_confirmed(updated)
   end
 
@@ -437,10 +445,10 @@ defmodule Tymeslot.Bookings.Reschedule do
   # leave room creation to the approval that confirms the booking. When a room
   # is on its way, its job sends these notifications once the join link
   # exists.
-  defp announce(updated, original) do
+  defp announce(updated, original, opts) do
     case RescheduleLocation.create_room(updated, original) do
       :scheduled -> :ok
-      :not_scheduled -> send_reschedule_notifications(updated, original)
+      :not_scheduled -> send_reschedule_notifications(updated, original, opts)
     end
   end
 
@@ -591,8 +599,8 @@ defmodule Tymeslot.Bookings.Reschedule do
     end
   end
 
-  defp send_reschedule_notifications(updated_meeting, original_meeting) do
-    case Events.meeting_rescheduled(updated_meeting, original_meeting) do
+  defp send_reschedule_notifications(updated_meeting, original_meeting, opts) do
+    case Events.meeting_rescheduled(updated_meeting, original_meeting, opts) do
       {:ok, _result} ->
         Logger.info("Reschedule notifications sent", meeting_id: updated_meeting.id)
         :ok

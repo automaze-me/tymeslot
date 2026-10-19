@@ -1268,3 +1268,8 @@ msgstr "Ce rendez-vous de groupe a été <strong>reporté dans votre calendrier 
 #, elixir-autogen, elixir-format
 msgid "This meeting was <strong>rescheduled in your external calendar</strong>. Tymeslot still shows the original time above. To move the booking to the new time, open it in your dashboard and choose <strong>Move booking</strong>: Tymeslot then reschedules its reminders and emails the attendee the new time."
 msgstr "Cette réunion a été <strong>reportée dans votre calendrier externe</strong>. Tymeslot affiche encore l’horaire d’origine ci-dessus. Pour déplacer la réservation au nouvel horaire, ouvrez-la dans votre tableau de bord et choisissez <strong>Déplacer la réservation</strong> : Tymeslot reprogramme alors ses rappels et envoie le nouvel horaire au participant par e-mail."
+
+#: lib/tymeslot/emails/templates/appointment_rescheduled.ex
+#, elixir-autogen, elixir-format
+msgid "You moved this meeting in your calendar."
+msgstr "Vous avez déplacé ce rendez-vous dans votre calendrier."

@@ -19,8 +19,8 @@ defmodule Tymeslot.Bookings.RescheduleFollowCalendarTest do
   import Tymeslot.Factory
 
   alias Ecto.UUID
-  alias Tymeslot.Availability.WeeklySchedule
   alias Tymeslot.Bookings.Reschedule
+  alias Tymeslot.Emails.EmailScheduler
   alias Tymeslot.Meetings.GuestQueries
   alias Tymeslot.Meetings.MeetingSchema
   alias Tymeslot.Repo
@@ -41,14 +41,6 @@ defmodule Tymeslot.Bookings.RescheduleFollowCalendarTest do
 
     TestMocks.setup_email_mocks()
 
-    # The reschedule submit re-reads the host's connected calendars
-
-    # (`Tymeslot.Bookings.CalendarCheck`); these tests are about a host with
-
-    # nothing else in their diary.
-
-    TestMocks.stub_no_calendar_events()
-
     # The real service, so the templates actually render. Restored afterwards
     # for the rest of the suite.
     original_service = Application.get_env(:tymeslot, :email_service_module)
@@ -67,34 +59,12 @@ defmodule Tymeslot.Bookings.RescheduleFollowCalendarTest do
     end)
 
     user = insert(:user)
-    profile = insert(:profile, user: user, timezone: "Europe/Berlin")
-
-    # The booking policy lives on the schedule now, not the profile; these tests
-    # only need one to exist so the reschedule resolves a policy at all. It
-    # must offer every hour of every day: reschedule now refuses a time the
-    # organiser's schedule doesn't offer, and these tests pick
-    # `future_datetime/2`, a fixed mid-day time.
-    schedule =
-      insert(:availability_schedule,
-        profile: profile,
-        is_default: true,
-        buffer_before_minutes: 15,
-        buffer_after_minutes: 15
-      )
-
-    for day_of_week <- 1..7 do
-      {:ok, _day} =
-        WeeklySchedule.create_day_availability(schedule.id, day_of_week, %{
-          is_available: true,
-          start_time: ~T[00:00:00],
-          end_time: ~T[23:59:00]
-        })
-    end
+    insert(:profile, user: user, timezone: "Europe/Berlin")
 
     insert(:webhook, user: user, events: ["meeting.rescheduled"])
     insert(:telegram_integration, user: user, events: ["meeting.rescheduled"])
 
-    %{user: user, profile: profile}
+    %{user: user}
   end
 
   describe "follow_calendar/3" do
@@ -130,8 +100,15 @@ defmodule Tymeslot.Bookings.RescheduleFollowCalendarTest do
     end
 
     test "re-pins the reminders to the new time", %{user: user} do
-      meeting = insert_future_meeting(user, reminders_sent: [%{"value" => 24, "unit" => "hours"}])
+      reminder = %{"value" => 24, "unit" => "hours"}
+      meeting = insert_future_meeting(user, reminders: [reminder], reminders_sent: [reminder])
       {new_start, new_end} = new_times(meeting)
+
+      # The reminder pinned to the old time, still waiting to send.
+      old_reminder_at = DateTime.add(meeting.start_time, -24, :hour)
+      :ok = EmailScheduler.schedule_reminder_emails(meeting.id, 24, "hours", old_reminder_at)
+      assert [old_job] = all_enqueued(worker: EmailWorker)
+      assert DateTime.compare(old_job.scheduled_at, old_reminder_at) == :eq
 
       assert {:ok, updated} = Reschedule.follow_calendar(meeting, new_start, new_end)
 
@@ -139,6 +116,7 @@ defmodule Tymeslot.Bookings.RescheduleFollowCalendarTest do
 
       jobs = all_enqueued(worker: EmailWorker, args: %{"action" => "send_reminder_emails"})
       assert jobs != []
+      refute Enum.any?(jobs, &(&1.id == old_job.id))
 
       for job <- jobs do
         assert DateTime.compare(job.scheduled_at, new_start) == :lt
@@ -156,6 +134,24 @@ defmodule Tymeslot.Bookings.RescheduleFollowCalendarTest do
 
       assert delivered[meeting.attendee_email].subject =~ "Rescheduled"
       assert delivered[meeting.organizer_email].subject =~ "Rescheduled"
+    end
+
+    test "tells the host they moved the meeting, not the attendee", %{user: user} do
+      meeting = insert_future_meeting(user, attendee_name: "Ada Attendee")
+      {new_start, new_end} = new_times(meeting)
+
+      assert {:ok, _updated} = Reschedule.follow_calendar(meeting, new_start, new_end)
+
+      delivered = delivered_emails()
+      organizer = delivered[meeting.organizer_email]
+      attendee = delivered[meeting.attendee_email]
+
+      for body <- [organizer.text_body, organizer.html_body] do
+        assert body =~ "You moved this meeting in your calendar."
+        refute body =~ "has moved your meeting"
+      end
+
+      refute attendee.text_body =~ "You moved this meeting in your calendar."
     end
 
     test "resets and emails the booking's guests", %{user: user} do

@@ -1269,3 +1269,8 @@ msgstr "To spotkanie grupowe zostało <strong>przeniesione w zewnętrznym kalend
 #, elixir-autogen, elixir-format
 msgid "This meeting was <strong>rescheduled in your external calendar</strong>. Tymeslot still shows the original time above. To move the booking to the new time, open it in your dashboard and choose <strong>Move booking</strong>: Tymeslot then reschedules its reminders and emails the attendee the new time."
 msgstr "To spotkanie zostało <strong>przeniesione w zewnętrznym kalendarzu</strong>. Tymeslot wciąż pokazuje powyżej pierwotny termin. Aby przenieść rezerwację na nowy termin, otwórz ją w panelu i wybierz <strong>Przenieś rezerwację</strong>: Tymeslot zaplanuje wtedy na nowo swoje przypomnienia i wyśle uczestnikowi e-mailem nowy termin."
+
+#: lib/tymeslot/emails/templates/appointment_rescheduled.ex
+#, elixir-autogen, elixir-format
+msgid "You moved this meeting in your calendar."
+msgstr "To spotkanie zostało przeniesione w twoim kalendarzu."

@@ -283,12 +283,13 @@ defmodule Tymeslot.Notifications.Orchestrator do
   @doc """
   Sends reschedule notifications immediately, to the host and the booker and
   then to the booking's guests (`GuestNotifications.notify_rescheduled/2`).
+  `opts` go to `ContentBuilder.build_reschedule_details/3`.
   """
-  @spec send_reschedule_notifications(%{atom() => term()}, %{atom() => term()}) ::
+  @spec send_reschedule_notifications(%{atom() => term()}, %{atom() => term()}, keyword()) ::
           {:ok, atom()} | {:error, term()}
-  def send_reschedule_notifications(updated_meeting, original_meeting) do
+  def send_reschedule_notifications(updated_meeting, original_meeting, opts \\ []) do
     recipients = Recipients.determine_recipients(updated_meeting, :reschedule)
-    content = ContentBuilder.build_reschedule_details(updated_meeting, original_meeting)
+    content = ContentBuilder.build_reschedule_details(updated_meeting, original_meeting, opts)
 
     with :ok <- Recipients.validate_recipients(recipients),
          :ok <- ContentBuilder.validate_content(content) do
