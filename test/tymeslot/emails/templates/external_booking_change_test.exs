@@ -66,7 +66,41 @@ defmodule Tymeslot.Emails.ExternalBookingChangeTest do
 
       assert email.subject =~ "rescheduled"
       assert email.text_body =~ "rescheduled"
-      assert email.text_body =~ "please update or reschedule the booking in Tymeslot"
+      assert email.text_body =~ "Move booking"
+    end
+
+    test "a rescheduled one-to-one meeting points to the dashboard's Move booking" do
+      meeting = build_meeting()
+
+      email =
+        ExternalBookingChange.render(meeting, "john@example.com", :modified, "Europe/London")
+
+      assert email.html_body =~ "Move booking"
+      assert email.html_body =~ ~r{href="[^"]*/dashboard/meetings"}
+      refute email.html_body =~ "meetings/abc"
+      assert email.text_body =~ "Move booking"
+      refute email.text_body =~ "<strong>"
+    end
+
+    test "a rescheduled group meeting keeps its own wording" do
+      meeting = build_meeting(%{capacity: 5, attendee_name: nil, attendee_email: nil})
+
+      email =
+        ExternalBookingChange.render(meeting, "john@example.com", :modified, "Europe/London")
+
+      refute email.html_body =~ "Move booking"
+      refute email.text_body =~ "Move booking"
+      assert email.html_body =~ "meetings/abc"
+    end
+
+    test "a deleted meeting is unchanged" do
+      meeting = build_meeting()
+
+      email = ExternalBookingChange.render(meeting, "john@example.com", :deleted, "Europe/London")
+
+      refute email.html_body =~ "Move booking"
+      refute email.text_body =~ "Move booking"
+      assert email.html_body =~ "meetings/abc"
     end
 
     # A group meeting cannot be rescheduled as a whole, so the email must not

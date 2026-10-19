@@ -376,11 +376,6 @@ msgstr "З нетерпінням чекаю на нашу зустріч. Я в
 msgid "If the meeting is no longer happening, please cancel it in Tymeslot so the attendee is notified and the time slot is freed up."
 msgstr "Якщо зустріч більше не відбудеться, будь ласка, скасуйте її в Tymeslot, щоб учасник отримав сповіщення, а часовий слот звільнився."
 
-#: lib/tymeslot/emails/templates/external_booking_change.ex
-#, elixir-autogen, elixir-format
-msgid "If the new time is final, please update or reschedule the booking in Tymeslot so the attendee receives updated details."
-msgstr "Якщо новий час остаточний, будь ласка, оновіть або перенесіть бронювання в Tymeslot, щоб учасник отримав оновлені деталі."
-
 #: lib/tymeslot/emails/templates/appointment_cancellation.ex
 #, elixir-autogen, elixir-format
 msgid "If you have any questions, please don't hesitate to reach out."
@@ -821,11 +816,6 @@ msgstr "Наближається зустріч із %{organizer}, на яку �
 #, elixir-autogen, elixir-format
 msgid "This meeting was <strong>removed from your external calendar</strong> but is still active in Tymeslot. If the meeting is no longer happening, please cancel it in Tymeslot so the attendee is notified and the time slot is freed up."
 msgstr "Цю зустріч <strong>видалено з вашого зовнішнього календаря</strong>, але вона все ще активна в Tymeslot. Якщо вона більше не відбудеться, будь ласка, скасуйте її в Tymeslot, щоб учасник отримав сповіщення, а часовий слот звільнився."
-
-#: lib/tymeslot/emails/templates/external_booking_change.ex
-#, elixir-autogen, elixir-format
-msgid "This meeting was <strong>rescheduled in your external calendar</strong>. Tymeslot still shows the original time above. If the new time is final, please update or reschedule the booking in Tymeslot so the attendee receives updated details."
-msgstr "Цю зустріч <strong>перенесено у вашому зовнішньому календарі</strong>. У Tymeslot вище все ще показано початковий час. Якщо новий час остаточний, будь ласка, оновіть або перенесіть бронювання в Tymeslot, щоб учасник отримав оновлені деталі."
 
 #: lib/tymeslot/emails/templates/external_booking_change.ex
 #, elixir-autogen, elixir-format
@@ -1274,3 +1264,8 @@ msgstr "Групову зустріч «%{title}» перенесено у ва�
 #, elixir-autogen, elixir-format
 msgid "This group meeting was <strong>rescheduled in your external calendar</strong>. Tymeslot still shows the original time above, and its participants still expect it. To keep the original time, move the event back in your calendar. To change it, send the participants a reschedule request from your dashboard, or cancel the meeting there so every participant is notified."
 msgstr "Цю групову зустріч <strong>перенесено у вашому зовнішньому календарі</strong>. У Tymeslot вище досі показано початковий час, і учасники досі на нього розраховують. Щоб зберегти початковий час, поверніть подію на місце у своєму календарі. Щоб змінити його, надішліть учасникам запит на перенесення з панелі керування або скасуйте там зустріч, щоб кожен учасник отримав сповіщення."
+
+#: lib/tymeslot/emails/templates/external_booking_change.ex
+#, elixir-autogen, elixir-format
+msgid "This meeting was <strong>rescheduled in your external calendar</strong>. Tymeslot still shows the original time above. To move the booking to the new time, open it in your dashboard and choose <strong>Move booking</strong>: Tymeslot then reschedules its reminders and emails the attendee the new time."
+msgstr "Цю зустріч <strong>перенесено у вашому зовнішньому календарі</strong>. У Tymeslot вище все ще показано початковий час. Щоб перенести бронювання на новий час, відкрийте його на панелі керування та виберіть <strong>Перенести бронювання</strong>: Tymeslot тоді перепланує свої нагадування й надішле учаснику новий час електронною поштою."

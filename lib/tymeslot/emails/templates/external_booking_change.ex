@@ -74,7 +74,7 @@ defmodule Tymeslot.Emails.Templates.ExternalBookingChange do
 
   defp render_html(meeting, owner_time, discrepancy, locale) do
     dashboard_url = UrlBuilder.build_url("/dashboard/meetings")
-    view_url = meeting.view_url || dashboard_url
+    view_url = action_url(discrepancy, meeting, dashboard_url)
 
     {alert_intent, alert_message, alert_title} = alert_parts(discrepancy, meeting)
     safe_title = Sanitise.sanitize_for_email(meeting.title)
@@ -109,6 +109,15 @@ defmodule Tymeslot.Emails.Templates.ExternalBookingChange do
       stage_subtitle: stage_subtitle(meeting)
     )
   end
+
+  # A rescheduled one-to-one meeting is moved from its card in the dashboard's
+  # meetings list, so the button goes there; every other mail keeps the
+  # meeting's own link.
+  defp action_url(:modified, meeting, dashboard_url) do
+    if Meeting.group?(meeting), do: meeting.view_url || dashboard_url, else: dashboard_url
+  end
+
+  defp action_url(_discrepancy, meeting, dashboard_url), do: meeting.view_url || dashboard_url
 
   # A group meeting cannot be moved as a whole (`Tymeslot.Bookings.Reschedule`
   # refuses it), so its copy never asks the organiser to update or reschedule
@@ -194,7 +203,7 @@ defmodule Tymeslot.Emails.Templates.ExternalBookingChange do
     else
       dgettext(
         "emails_booking",
-        "This meeting was <strong>rescheduled in your external calendar</strong>. Tymeslot still shows the original time above. If the new time is final, please update or reschedule the booking in Tymeslot so the attendee receives updated details."
+        "This meeting was <strong>rescheduled in your external calendar</strong>. Tymeslot still shows the original time above. To move the booking to the new time, open it in your dashboard and choose <strong>Move booking</strong>: Tymeslot then reschedules its reminders and emails the attendee the new time."
       )
     end
   end
@@ -230,7 +239,7 @@ defmodule Tymeslot.Emails.Templates.ExternalBookingChange do
 
   defp render_text(meeting, owner_time, :modified, locale) do
     dashboard_url = UrlBuilder.build_url("/dashboard/meetings")
-    view_url = meeting.view_url || dashboard_url
+    view_url = action_url(:modified, meeting, dashboard_url)
     custom_answers = TextBodyHelper.format_custom_answers(meeting, locale)
 
     """
@@ -260,10 +269,7 @@ defmodule Tymeslot.Emails.Templates.ExternalBookingChange do
         "A group meeting cannot be moved for everyone at once. To keep the original time, move the event back in your calendar. To change it, send the participants a reschedule request from your dashboard, or cancel the meeting there so every participant is notified."
       )
     else
-      dgettext(
-        "emails_booking",
-        "If the new time is final, please update or reschedule the booking in Tymeslot so the attendee receives updated details."
-      )
+      meeting |> modified_explanation_html() |> HtmlSanitizeEx.strip_tags()
     end
   end
 

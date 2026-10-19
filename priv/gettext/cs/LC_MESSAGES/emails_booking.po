@@ -376,11 +376,6 @@ msgstr "Těším se na naši schůzku. Termín mám zapsaný v kalendáři a b
 msgid "If the meeting is no longer happening, please cancel it in Tymeslot so the attendee is notified and the time slot is freed up."
 msgstr "Pokud se schůzka neuskuteční, zrušte ji prosím ve službě Tymeslot, aby byl účastník informován a termín se uvolnil."
 
-#: lib/tymeslot/emails/templates/external_booking_change.ex
-#, elixir-autogen, elixir-format
-msgid "If the new time is final, please update or reschedule the booking in Tymeslot so the attendee receives updated details."
-msgstr "Pokud je nový čas konečný, upravte nebo přesuňte rezervaci ve službě Tymeslot, aby účastník dostal aktuální údaje."
-
 #: lib/tymeslot/emails/templates/appointment_cancellation.ex
 #, elixir-autogen, elixir-format
 msgid "If you have any questions, please don't hesitate to reach out."
@@ -821,11 +816,6 @@ msgstr "Blíží se schůzka s %{organizer}, na kterou vás pozval %{booker}."
 #, elixir-autogen, elixir-format
 msgid "This meeting was <strong>removed from your external calendar</strong> but is still active in Tymeslot. If the meeting is no longer happening, please cancel it in Tymeslot so the attendee is notified and the time slot is freed up."
 msgstr "Tato schůzka byla <strong>odstraněna z vašeho externího kalendáře</strong>, ale ve službě Tymeslot je stále aktivní. Pokud se schůzka neuskuteční, zrušte ji prosím ve službě Tymeslot, aby byl účastník informován a termín se uvolnil."
-
-#: lib/tymeslot/emails/templates/external_booking_change.ex
-#, elixir-autogen, elixir-format
-msgid "This meeting was <strong>rescheduled in your external calendar</strong>. Tymeslot still shows the original time above. If the new time is final, please update or reschedule the booking in Tymeslot so the attendee receives updated details."
-msgstr "Tato schůzka byla <strong>přesunuta ve vašem externím kalendáři</strong>. Služba Tymeslot výše stále zobrazuje původní čas. Pokud je nový čas konečný, upravte nebo přesuňte rezervaci ve službě Tymeslot, aby účastník dostal aktuální údaje."
 
 #: lib/tymeslot/emails/templates/external_booking_change.ex
 #, elixir-autogen, elixir-format
@@ -1274,3 +1264,8 @@ msgstr "Skupinová schůzka „%{title}“ byla přesunuta ve vašem externím k
 #, elixir-autogen, elixir-format
 msgid "This group meeting was <strong>rescheduled in your external calendar</strong>. Tymeslot still shows the original time above, and its participants still expect it. To keep the original time, move the event back in your calendar. To change it, send the participants a reschedule request from your dashboard, or cancel the meeting there so every participant is notified."
 msgstr "Tato skupinová schůzka byla <strong>přesunuta ve vašem externím kalendáři</strong>. Služba Tymeslot výše stále zobrazuje původní čas a účastníci s ním stále počítají. Chcete-li zachovat původní čas, vraťte událost ve svém kalendáři zpět. Chcete-li ho změnit, pošlete účastníkům z nástěnky žádost o přesunutí, nebo tam schůzku zrušte, aby byl každý účastník informován."
+
+#: lib/tymeslot/emails/templates/external_booking_change.ex
+#, elixir-autogen, elixir-format
+msgid "This meeting was <strong>rescheduled in your external calendar</strong>. Tymeslot still shows the original time above. To move the booking to the new time, open it in your dashboard and choose <strong>Move booking</strong>: Tymeslot then reschedules its reminders and emails the attendee the new time."
+msgstr "Tato schůzka byla <strong>přesunuta ve vašem externím kalendáři</strong>. Služba Tymeslot výše stále zobrazuje původní čas. Chcete-li rezervaci přesunout na nový čas, otevřete ji ve svém přehledu a zvolte <strong>Přesunout rezervaci</strong>: Tymeslot pak přeplánuje své připomínky a pošle účastníkovi e-mailem nový čas."
